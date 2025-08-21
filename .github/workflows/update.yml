@@ -1,0 +1,29 @@
+name: Build & publish site
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"   # toutes les 2h
+  workflow_dispatch: {}      # bouton "Run workflow"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # autorise le robot à pousser dans le repo
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate site
+        run: node scripts/generate.mjs
+
+      - name: Commit & push updated page
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: "docs/index.html"
+          message: "Update site [skip ci]"
