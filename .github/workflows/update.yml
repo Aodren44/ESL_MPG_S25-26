@@ -2,14 +2,14 @@ name: Build & publish site
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # toutes les 2h
-  workflow_dispatch: {}      # bouton "Run workflow"
+    - cron: "0 */2 * * *"   # exécution toutes les 2h
+  workflow_dispatch: {}      # bouton manuel "Run workflow"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write        # autoriser le push
 
     steps:
       - name: Checkout repo
@@ -23,10 +23,11 @@ jobs:
       - name: Install deps
         run: npm install
 
+      # Installe navigateurs + dépendances système de Playwright
       - name: Install Playwright dependencies
         run: npx playwright install --with-deps
 
-      - name: Generate site
+      - name: Generate site (scrape + build HTML)
         env:
           MPG_EMAIL: ${{ secrets.MPG_EMAIL }}
           MPG_PASSWORD: ${{ secrets.MPG_PASSWORD }}
