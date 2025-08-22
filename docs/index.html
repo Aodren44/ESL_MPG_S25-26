@@ -2,34 +2,131 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Classement MPG — démo</title>
+  <title>Classement MPG — Global</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 20px; }
-    h1 { margin-top: 0; }
-    small { color: #666; }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-    th, td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; }
-    th { background: #fafafa; }
+    :root { --bg:#fff; --fg:#111; --muted:#666; --border:#e5e7eb; --best:#e6ffed; --worst:#ffecec;}
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--fg); margin:40px auto; max-width:1100px; padding:0 16px; }
+    .card { border:1px solid var(--border); border-radius:14px; padding:22px; box-shadow:0 1px 2px rgba(0,0,0,.03); }
+    h1 { margin:0 0 6px 0; font-size:28px; }
+    small { color:var(--muted); }
+    table { width:100%; border-collapse: collapse; margin-top:14px; }
+    th, td { padding:10px 12px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+    thead th { background:#fafafa; position:sticky; top:0; }
+    tr:hover td { background:#fafafa; }
+    td.best { background: var(--best); font-weight:600; }
+    td.worst { background: var(--worst); }
+    .legend { margin-top:10px; color:var(--muted); font-size:14px; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Classement MPG — démo</h1>
-    <p><small>Généré automatiquement : 22/08/2025 14:54:13</small></p>
-
+    <h1>Classement MPG — Global</h1>
+    <p><small>Mis à jour automatiquement : 22/08/2025 16:51:46</small></p>
     <table>
       <thead>
-        <tr><th>Équipe</th><th>FR</th><th>EN</th><th>ES</th><th>IT</th><th>Total</th></tr>
+        <tr>
+          <th>#</th>
+          <th>Équipe</th>
+          <th>FR</th>
+          <th>EN</th>
+          <th>ES</th>
+          <th>IT</th>
+          <th>Total</th>
+          <th>Verts</th>
+          <th>Rouges</th>
+        </tr>
       </thead>
-      <tbody>
-        <tr><td>Exemple FC</td><td>10</td><td>8</td><td>7</td><td>6</td><td><strong>31</strong></td></tr>
-        <tr><td>Demo United</td><td>9</td><td>7</td><td>6</td><td>5</td><td><strong>27</strong></td></tr>
-      </tbody>
+      <tbody><tr>
+        <td class="">1</td>
+        <td class="">Malantate FC</td>
+        <td class="best">0</td><td class="">6</td><td class="best">10</td><td class="best">0</td>
+        <td class=""><strong>16</strong></td>
+        <td class="">3</td>
+        <td class="">2</td>
+      </tr>
+<tr>
+        <td class="">2</td>
+        <td class="">RedBull vodka</td>
+        <td class="best">0</td><td class="">7</td><td class="">8</td><td class="best">0</td>
+        <td class=""><strong>15</strong></td>
+        <td class="">2</td>
+        <td class="">2</td>
+      </tr>
+<tr>
+        <td class="">3</td>
+        <td class="">Monster 83</td>
+        <td class="best">0</td><td class="best">10</td><td class="">4</td><td class="best">0</td>
+        <td class=""><strong>14</strong></td>
+        <td class="">3</td>
+        <td class="">2</td>
+      </tr>
+<tr>
+        <td class="">4</td>
+        <td class="">Football team graou</td>
+        <td class="best">0</td><td class="">9</td><td class="">2</td><td class="best">0</td>
+        <td class=""><strong>11</strong></td>
+        <td class="">2</td>
+        <td class="">2</td>
+      </tr>
+<tr>
+        <td class="">5</td>
+        <td class="">Moncabounboa</td>
+        <td class="best">0</td><td class="">5</td><td class="">5</td><td class="best">0</td>
+        <td class=""><strong>10</strong></td>
+        <td class="">2</td>
+        <td class="">2</td>
+      </tr>
+<tr>
+        <td class="">6</td>
+        <td class="">FC Méplanku</td>
+        <td class="best">0</td><td class="">2</td><td class="">7</td><td class="best">0</td>
+        <td class=""><strong>9</strong></td>
+        <td class="">2</td>
+        <td class="">2</td>
+      </tr>
+<tr>
+        <td class="">7</td>
+        <td class="">Es Pennoise</td>
+        <td class="best">0</td><td class="worst">0</td><td class="">9</td><td class="best">0</td>
+        <td class=""><strong>9</strong></td>
+        <td class="">2</td>
+        <td class="">3</td>
+      </tr>
+<tr>
+        <td class="">8</td>
+        <td class="">Es pennoise</td>
+        <td class="best">0</td><td class="">8</td><td class="worst">0</td><td class="best">0</td>
+        <td class=""><strong>8</strong></td>
+        <td class="">2</td>
+        <td class="">3</td>
+      </tr>
+<tr>
+        <td class="">9</td>
+        <td class="">New Team</td>
+        <td class="best">0</td><td class="">1</td><td class="">6</td><td class="best">0</td>
+        <td class=""><strong>7</strong></td>
+        <td class="">2</td>
+        <td class="">2</td>
+      </tr>
+<tr>
+        <td class="">10</td>
+        <td class="">Pionniers Tours 🏈</td>
+        <td class="best">0</td><td class="">3</td><td class="">3</td><td class="best">0</td>
+        <td class=""><strong>6</strong></td>
+        <td class="">2</td>
+        <td class="">2</td>
+      </tr>
+<tr>
+        <td class="">11</td>
+        <td class="">ElProfesor deRosario</td>
+        <td class="best">0</td><td class="">4</td><td class="">1</td><td class="best">0</td>
+        <td class=""><strong>5</strong></td>
+        <td class="">2</td>
+        <td class="">2</td>
+      </tr></tbody>
     </table>
-
-    <p>👉 Étape de démo OK. Prochaine étape : brancher les vrais classements MPG.</p>
+    <div class="legend">Verts = meilleur score de la ligue ; Rouges = plus petit score de la ligue (sert aux tie-breakers).</div>
   </div>
 </body>
 </html>
