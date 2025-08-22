@@ -9,7 +9,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # important pour pousser les fichiers
+      contents: write
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -19,7 +20,19 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Install deps
+        run: npm install
+
+      # Installe les navigateurs + dépendances système pour Playwright
+      - name: Install Playwright browsers
+        uses: microsoft/playwright-github-action@v1
+        with:
+          with-deps: true
+
       - name: Generate site
+        env:
+          MPG_EMAIL: ${{ secrets.MPG_EMAIL }}
+          MPG_PASSWORD: ${{ secrets.MPG_PASSWORD }}
         run: node scripts/generate.mjs
 
       - name: Push changes
