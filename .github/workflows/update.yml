@@ -23,11 +23,8 @@ jobs:
       - name: Install deps
         run: npm install
 
-      # Installe les navigateurs + dépendances système pour Playwright
-      - name: Install Playwright browsers
-        uses: microsoft/playwright-github-action@v1
-        with:
-          with-deps: true
+      - name: Install Playwright dependencies
+        run: npx playwright install --with-deps
 
       - name: Generate site
         env:
