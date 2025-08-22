@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # autorise le robot à pousser dans le repo
+      contents: write   # important pour pousser les fichiers
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -22,8 +22,10 @@ jobs:
       - name: Generate site
         run: node scripts/generate.mjs
 
-      - name: Commit & push updated page
-        uses: EndBug/add-and-commit@v9
-        with:
-          add: "docs/index.html"
-          message: "Update site [skip ci]"
+      - name: Push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          git commit -m "Update site [skip ci]" || echo "No changes to commit"
+          git push
