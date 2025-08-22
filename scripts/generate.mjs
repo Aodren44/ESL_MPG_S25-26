@@ -164,40 +164,65 @@ async function login(page) {
   console.log("✅ Login tenté, url actuelle:", page.url());
 }
 
-/* ============== SCRAPER ============== */
+// helper à coller AU-DESSUS de scrapeLeague
+async function gotoWithRetry(page, url, tries = 3) {
+  for (let i = 1; i <= tries; i++) {
+    try {
+      console.log(`↻ goto try ${i}/${tries}:`, url);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+      // on laisse l’app SPA charger un peu
+      await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
+      return true;
+    } catch (e) {
+      console.log("   goto fail:", e?.message);
+      if (i === tries) return false;
+    }
+  }
+  return false;
+}
+
+// === SCRAPER ===
 async function scrapeLeague(page, url) {
   const out = [];
-  try {
-    console.log("→ GOTO league", url);
-    await page.goto(url, { waitUntil: "networkidle", timeout: 60000 });
-  } catch (e) {
-    console.log("⚠️ goto échoué pour", url, e?.message);
+
+  // 1) navigation robuste (corrige FR)
+  const ok = await gotoWithRetry(page, url, 3);
+  if (!ok) {
+    console.log("⚠️ impossible de charger la page de ligue", url);
     return out;
   }
 
+  // 2) attendre le tableau avec plusieurs stratégies (corrige IT)
+  //   a) nos sélecteurs cibles
+  const wanted = '[data-testid="ranking-row"], table, [role="table"]';
   try {
-    await page.waitForSelector(
-      '[data-testid="ranking-row"], table, [role="table"]',
-      { timeout: 10000 }
-    );
+    await page.waitForSelector(wanted, { timeout: 8000 });
+  } catch {}
+
+  //   b) si toujours rien de visible, attendre qu’il y ait des lignes utilisables
+  try {
+    await page.waitForFunction(() => {
+      const rankRows = document.querySelectorAll('[data-testid="ranking-row"]').length;
+      const tableRows = Array.from(document.querySelectorAll("table tr, [role=table] tr"))
+        .filter(tr => tr.querySelectorAll("td").length > 1).length;
+      return rankRows > 0 || tableRows > 2;
+    }, { timeout: 8000 });
   } catch (e) {
-    console.log("⚠️ pas de sélecteur table/ranking pour", url, e?.message);
-    return out;
+    console.log("⚠️ pas de structure de tableau détectée:", e?.message);
+    // on continue quand même, le fallback ci‑dessous tentera un parse large
   }
 
-  // 1) Rangées marquées
+  // 3) chemin 1 : lignes balisées par data-testid
   const rows = await page.$$('[data-testid="ranking-row"]');
   if (rows.length > 0) {
     console.log("   rows[data-testid=ranking-row] =", rows.length);
     for (const r of rows) {
       const name =
-        (await r
-          .locator(".team-name, .name, [data-testid=team-name]")
-          .textContent()
-          .catch(() => null))?.trim() ?? (await r.textContent()).trim();
+        (await r.locator(".team-name, .name, [data-testid=team-name]").textContent().catch(() => null))?.trim()
+        ?? (await r.textContent() || "").trim();
 
       let ptsText =
-        (await r.locator(".points, .pts").textContent().catch(() => null)) ?? "";
+        (await r.locator(".points, .pts, [data-testid*=points]").textContent().catch(() => null)) ?? "";
 
       if (!ptsText) {
         const all = (await r.textContent()) || "";
@@ -211,11 +236,13 @@ async function scrapeLeague(page, url) {
     return out;
   }
 
-  // 2) Fallback tableau générique
-  const trs = await page.$$("table tr, [role=table] tr");
+  // 4) chemin 2 : fallback tableau générique (plus permissif)
+  const trs = await page.$$("table tr, [role=table] tr, div[role='row']");
+  let found = 0;
   for (const tr of trs) {
-    const tds = await tr.$$("td, th, div");
-    if (!tds.length) continue;
+    // on prend seulement les lignes avec au moins 2 cellules “données”
+    const tds = await tr.$$("td, [role='cell'], th, div");
+    if (tds.length < 2) continue;
 
     let team = null;
     let points = null;
@@ -223,14 +250,21 @@ async function scrapeLeague(page, url) {
     for (const el of tds) {
       const txt = ((await el.textContent()) || "").trim();
       if (!team && /[A-Za-zÀ-ÿ]/.test(txt) && txt.length > 1) team = txt;
-      if (!points && /^\d+$/.test(txt)) points = Number.parseInt(txt, 10);
+      if (!points) {
+        const m = txt.match(/^\d+$/);
+        if (m) points = Number.parseInt(m[0], 10);
+      }
     }
 
-    if (team && Number.isFinite(points)) out.push({ team, points });
+    if (team && Number.isFinite(points)) {
+      out.push({ team, points });
+      found++;
+    }
   }
-  console.log("   rows<table> =", out.length);
+  console.log("   rows<table> (fallback) =", found);
   return out;
 }
+
 
 /* ===== AGRÉGATION + RENDU ===== */
 function aggregate(leagues) {
