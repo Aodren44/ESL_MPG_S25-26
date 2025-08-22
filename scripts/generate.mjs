@@ -25,18 +25,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nowStr = () =>
   new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
 
-// === LOGIN (ta version + logs) ===
+/* ===========================
+   LOGIN (robuste: iframe/CTA)
+=========================== */
 async function login(page) {
   console.log("🔐 login() start");
 
-  // Tente plusieurs URLs de connexion possibles
-  const urls = [
-    "https://mpg.football/login",
-    "https://mpg.football/connexion",
-    "https://mpg.football/auth/login",
-  ];
-
-  // petite fonction utilitaire : tenter de fermer les cookies (plusieurs systèmes possibles)
+  // Cookies (page + iframes OneTrust)
   async function acceptCookies() {
     const selectors = [
       "#onetrust-accept-btn-handler",
@@ -50,99 +45,126 @@ async function login(page) {
     for (const sel of selectors) {
       try {
         const btn = await page.$(sel);
-        if (btn) {
-          await btn.click().catch(() => {});
-          await page.waitForTimeout(400);
-          clicked = true;
-          break;
-        }
+        if (btn) { await btn.click().catch(()=>{}); clicked = true; break; }
       } catch {}
     }
-    // Parfois le bandeau est dans un iframe OneTrust
     if (!clicked) {
-      for (const frame of page.frames()) {
+      for (const f of page.frames()) {
         try {
-          const b = await frame.$("#onetrust-accept-btn-handler");
-          if (b) {
-            await b.click().catch(() => {});
-            await page.waitForTimeout(300);
-            clicked = true;
-            break;
-          }
+          const b = await f.$("#onetrust-accept-btn-handler");
+          if (b) { await b.click().catch(()=>{}); clicked = true; break; }
         } catch {}
       }
     }
-    if (clicked) console.log("🍪 cookies: accepté");
+    if (clicked) { console.log("🍪 cookies: accepté"); await page.waitForTimeout(300); }
   }
 
-  // Navigue successivement sur les URLs candidates jusqu'à trouver le champ email
-  let found = false;
-  for (const u of urls) {
-    try {
-      console.log("→ GOTO", u);
-      await page.goto(u, { waitUntil: "domcontentloaded", timeout: 60000 });
-    } catch (e) {
-      console.log("⚠️ goto échec:", u, e?.message);
-      continue;
+  // Cherche un champ dans la page ou ses frames
+  async function findFieldAcrossFrames(selector) {
+    const frames = [page, ...page.frames()];
+    for (const f of frames) {
+      try {
+        const loc = f.locator(selector);
+        const handle = await loc.elementHandle({ timeout: 600 }).catch(()=>null);
+        if (handle) return { frame: f, locator: loc };
+      } catch {}
     }
-    await page.waitForTimeout(800);
+    return null;
+  }
+
+  // Clique un CTA "Se connecter"
+  async function clickLoginCTA() {
+    const selectors = [
+      "a[href*='/login']",
+      "a[href*='connexion']",
+      "button:has-text('Se connecter')",
+      "button:has-text('Connexion')",
+      "button:has-text('Login')",
+      "a:has-text('Se connecter')",
+      "a:has-text('Connexion')",
+      "[data-testid*='login']",
+    ];
+    for (const sel of selectors) {
+      const el = await page.$(sel).catch(()=>null);
+      if (el) {
+        console.log("▶️ clique CTA login:", sel);
+        await el.click().catch(()=>{});
+        await page.waitForLoadState("networkidle").catch(()=>{});
+        await page.waitForTimeout(700);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 1) Aller sur la home
+  console.log("→ GOTO home");
+  await page.goto("https://mpg.football/", { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
+  await page.waitForTimeout(800);
+  await acceptCookies();
+
+  // 2) Essayer les URLs directes de login
+  const loginUrls = [
+    "https://mpg.football/login",
+    "https://mpg.football/connexion",
+    "https://mpg.football/auth/login",
+  ];
+  for (const u of loginUrls) {
+    console.log("→ tentative URL login:", u);
+    await page.goto(u, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
+    await page.waitForTimeout(600);
     await acceptCookies();
 
-    const emailField = await page
-      .$(
-        "input[type='email'], input[name='email'], #email, input[autocomplete='email']"
-      )
-      .catch(() => null);
+    const found = await findFieldAcrossFrames("input[type='email'], input[name='email'], #email, input[autocomplete='email']");
+    if (found) { console.log("✅ Champ email trouvé via URL directe, frame:", found.frame.url()); break; }
+  }
 
-    if (emailField) {
-      console.log("✅ Formulaire trouvé sur", page.url());
-      found = true;
-      break;
+  // 3) Sinon, cliquer un CTA
+  let emailField = await findFieldAcrossFrames("input[type='email'], input[name='email'], #email, input[autocomplete='email']");
+  if (!emailField) {
+    const clicked = await clickLoginCTA();
+    if (clicked) {
+      emailField = await findFieldAcrossFrames("input[type='email'], input[name='email'], #email, input[autocomplete='email']");
     }
   }
+  if (!emailField) throw new Error("Formulaire de connexion introuvable (email).");
 
-  if (!found) {
-    throw new Error("Formulaire de connexion introuvable (email).");
-  }
+  // 4) Mot de passe (même frame)
+  const pwdField = await findFieldAcrossFrames("input[type='password'], input[name='password'], #password, input[autocomplete='current-password']");
+  if (!pwdField) throw new Error("Champ mot de passe introuvable.");
 
-  // Renseigne email + mot de passe et soumet
-  await page.fill(
-    "input[type='email'], input[name='email'], #email, input[autocomplete='email']",
-    EMAIL,
-    { timeout: 30000 }
-  );
-  await page.fill(
-    "input[type='password'], input[name='password'], #password, input[autocomplete='current-password']",
-    PASSWORD,
-    { timeout: 30000 }
-  );
+  await emailField.locator.fill(EMAIL, { timeout: 30000 });
+  await pwdField.locator.fill(PASSWORD, { timeout: 30000 });
 
-  // Clique un bouton submit (plusieurs variantes possibles)
-  const submits = [
+  // 5) Soumettre
+  const submitSelectors = [
     "button[type='submit']",
     "button:has-text('Se connecter')",
     "button:has-text('Connexion')",
     "button:has-text('Log in')",
     "button:has-text('Login')",
+    "input[type='submit']",
   ];
-  for (const sel of submits) {
+  let submitted = false;
+  for (const sel of submitSelectors) {
     try {
-      const b = await page.$(sel);
-      if (b) {
-        await b.click().catch(() => {});
+      const btn = await emailField.frame.$(sel);
+      if (btn) {
+        await btn.click().catch(()=>{});
         console.log("📨 Credentials soumis (via:", sel, ")");
+        submitted = true;
         break;
       }
     } catch {}
   }
+  if (!submitted) { try { await pwdField.locator.press("Enter"); console.log("↩️ Submit via Enter"); } catch {} }
 
-  // Attends d'être connecté/redirigé
-  await page.waitForLoadState("networkidle", { timeout: 60000 }).catch(() => {});
-  await page.waitForURL(/mpg\.football\/(dashboard|league)/, { timeout: 60000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 60000 }).catch(()=>{});
+  await page.waitForURL(/mpg\.football\/(dashboard|league)/, { timeout: 60000 }).catch(()=>{});
   console.log("✅ Login tenté, url actuelle:", page.url());
 }
 
-// === SCRAPER ===
+/* ============== SCRAPER ============== */
 async function scrapeLeague(page, url) {
   const out = [];
   try {
@@ -189,7 +211,7 @@ async function scrapeLeague(page, url) {
     return out;
   }
 
-  // 2) Fallback: tableau générique
+  // 2) Fallback tableau générique
   const trs = await page.$$("table tr, [role=table] tr");
   for (const tr of trs) {
     const tds = await tr.$$("td, th, div");
@@ -200,12 +222,8 @@ async function scrapeLeague(page, url) {
 
     for (const el of tds) {
       const txt = ((await el.textContent()) || "").trim();
-      if (!team && /[A-Za-zÀ-ÿ]/.test(txt) && txt.length > 1) {
-        team = txt;
-      }
-      if (!points && /^\d+$/.test(txt)) {
-        points = Number.parseInt(txt, 10);
-      }
+      if (!team && /[A-Za-zÀ-ÿ]/.test(txt) && txt.length > 1) team = txt;
+      if (!points && /^\d+$/.test(txt)) points = Number.parseInt(txt, 10);
     }
 
     if (team && Number.isFinite(points)) out.push({ team, points });
@@ -214,7 +232,7 @@ async function scrapeLeague(page, url) {
   return out;
 }
 
-// === AGRÉGATION + RENDU ===
+/* ===== AGRÉGATION + RENDU ===== */
 function aggregate(leagues) {
   const columns = ["FR", "EN", "ES", "IT"];
   const teams = new Set();
@@ -329,7 +347,7 @@ function renderHTML(table) {
 
 // === MAIN ===
 async function main() {
-  // Tips runner GitHub : pas de sandbox pour éviter des erreurs furtives
+  // Sur runner GitHub: pas de sandbox
   const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
   const page = await browser.newPage();
 
