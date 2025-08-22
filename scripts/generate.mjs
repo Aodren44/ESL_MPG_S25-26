@@ -1,0 +1,43 @@
+import { writeFileSync, mkdirSync } from "node:fs";
+
+const now = new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
+
+const html = `<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Classement MPG — démo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 20px; }
+    h1 { margin-top: 0; }
+    small { color: #666; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; }
+    th { background: #fafafa; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Classement MPG — démo</h1>
+    <p><small>Généré automatiquement : ${now}</small></p>
+
+    <table>
+      <thead>
+        <tr><th>Équipe</th><th>FR</th><th>EN</th><th>ES</th><th>IT</th><th>Total</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Exemple FC</td><td>10</td><td>8</td><td>7</td><td>6</td><td><strong>31</strong></td></tr>
+        <tr><td>Demo United</td><td>9</td><td>7</td><td>6</td><td>5</td><td><strong>27</strong></td></tr>
+      </tbody>
+    </table>
+
+    <p>👉 Étape de démo OK. Prochaine étape : brancher les vrais classements MPG.</p>
+  </div>
+</body>
+</html>`;
+
+mkdirSync("docs", { recursive: true });
+writeFileSync("docs/index.html", html, "utf8");
+console.log("docs/index.html regenerated at", now);
