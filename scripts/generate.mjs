@@ -1,3 +1,31 @@
+// scripts/generate.mjs
+import { chromium } from "playwright";
+import { writeFileSync, mkdirSync } from "node:fs";
+
+// ▼▼ Logs de démarrage
+console.log("🚀 Script generate.mjs lancé à", new Date().toISOString());
+
+// --- CONFIG ---
+const LEAGUES = {
+  FR: "https://mpg.football/league/mpg_league_N382D585/mpg_division_N382D585_10_1/ranking/general",
+  EN: "https://mpg.football/league/mpg_league_N382L3SN/mpg_division_N382L3SN_10_1/ranking/general",
+  ES: "https://mpg.football/league/mpg_league_N382NGDF/mpg_division_N382NGDF_10_1/ranking/general",
+  IT: "https://mpg.football/league/mpg_league_N382M95P/mpg_division_N382M95P_10_1/ranking/general",
+};
+
+const EMAIL = process.env.MPG_EMAIL;
+const PASSWORD = process.env.MPG_PASSWORD;
+
+if (!EMAIL || !PASSWORD) {
+  throw new Error("Secrets MPG_EMAIL / MPG_PASSWORD manquants.");
+}
+
+// --- HELPERS ---
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const nowStr = () =>
+  new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
+
+// === LOGIN (ta version + logs) ===
 async function login(page) {
   console.log("🔐 login() start");
 
@@ -97,19 +125,3 @@ async function login(page) {
     "button:has-text('Log in')",
     "button:has-text('Login')",
   ];
-  for (const sel of submits) {
-    try {
-      const b = await page.$(sel);
-      if (b) {
-        await b.click().catch(() => {});
-        console.log("📨 Credentials soumis (via:", sel, ")");
-        break;
-      }
-    } catch {}
-  }
-
-  // Attends d'être connecté/redirigé
-  await page.waitForLoadState("networkidle", { timeout: 60000 }).catch(() => {});
-  await page.waitForURL(/mpg\.football\/(dashboard|league)/, { timeout: 60000 }).catch(() => {});
-  console.log("✅ Login tenté, url actuelle:", page.url());
-}
