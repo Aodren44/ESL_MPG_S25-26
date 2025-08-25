@@ -5,11 +5,9 @@ import path from "node:path";
 
 /* ======================== CONFIG ======================== */
 
-// Ordre d’affichage + en‑têtes
 const ORDER = ["FR", "EN", "ES", "IT"];
 const HEADERS = { FR: "🇫🇷", EN: "🇬🇧", ES: "🇪🇸", IT: "🇮🇹" };
 
-// URLs (via secrets dans le workflow)
 const LEAGUES = {
   FR: process.env.MPG_ESL_FR || "",
   EN: process.env.MPG_ESL_UK || "",
@@ -17,18 +15,14 @@ const LEAGUES = {
   IT: process.env.MPG_ESL_IT || "",
 };
 
-// Identifiants (optionnels) pour se connecter si nécessaire
 const MPG_EMAIL = process.env.MPG_EMAIL || "";
 const MPG_PASSWORD = process.env.MPG_PASSWORD || "";
 
-// Où écrire la page (auto‑détection docs/ → sinon racine)
 const OUTPUT_DIR = existsSync("docs") ? "docs" : ".";
 const OUTPUT_FILE = path.join(OUTPUT_DIR, "index.html");
 
-// Titre
 const PAGE_TITLE = "Classement MPG — European Star League — S25/26";
 
-// Logs utiles pour vérifier les secrets
 for (const k of ORDER) {
   console.log(`URL ${k}:`, LEAGUES[k] ? "(ok via secret)" : "(vide)");
 }
@@ -58,8 +52,8 @@ async function safeClick(page, selectors = []) {
   for (const sel of selectors) {
     try {
       const loc = page.locator(sel).first();
-      if (await loc.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await loc.click({ timeout: 1500 });
+      if (await loc.isVisible({ timeout: 1200 }).catch(() => false)) {
+        await loc.click({ timeout: 2000 });
         return true;
       }
     } catch {}
@@ -75,123 +69,165 @@ async function dumpForDebug(page, code) {
     const content = await page.content().catch(() => "");
     if (content) writeFileSync(html, content);
     console.log(`🧩 Debug dump written: ${png}${content ? `, ${html}` : ""}`);
-  } catch (e) {
-    console.log("⚠️ Dump failed:", e?.message || e);
-  }
+  } catch {}
 }
 
-/* ======================== AUTH (OPTIONNELLE) ======================== */
+/* ======================== AUTH (LOGIN) ======================== */
 
-async function loginIfNeeded(context) {
+async function acceptCookies(page) {
+  await safeClick(page, [
+    'button:has-text("Accepter")',
+    'button:has-text("Accept")',
+    'button:has-text("Tout accepter")',
+    'button:has-text("OK")',
+    '[data-testid="uc-accept-all-button"]',
+  ]);
+}
+
+async function fillLoginForm(page) {
+  const emailSel = ['input[name="email"]', 'input[type="email"]', '#email', 'input[placeholder*="mail"]'];
+  const passSel = ['input[name="password"]', 'input[type="password"]', '#password', 'input[placeholder*="mot de passe"]'];
+
+  let okE = false;
+  for (const s of emailSel) {
+    if (await page.locator(s).first().isVisible({ timeout: 800 }).catch(() => false)) {
+      await page.fill(s, MPG_EMAIL);
+      okE = true;
+      break;
+    }
+  }
+  let okP = false;
+  for (const s of passSel) {
+    if (await page.locator(s).first().isVisible({ timeout: 800 }).catch(() => false)) {
+      await page.fill(s, MPG_PASSWORD);
+      okP = true;
+      break;
+    }
+  }
+  if (!(okE && okP)) return false;
+
+  await safeClick(page, [
+    'button[type="submit"]',
+    'button:has-text("Se connecter")',
+    'button:has-text("Je me connecte")',
+    'button:has-text("Login")',
+    'button:has-text("Sign in")',
+  ]);
+
+  // laisse le temps aux redirections
+  await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => {});
+  return true;
+}
+
+/**
+ * Essaie plusieurs parcours de login :
+ * - Homepage → "Je me connecte" / "Se connecter" → remplir formulaire
+ * - Accès direct /login
+ * Puis vérifie en chargeant une URL de ligue.
+ */
+async function loginIfNeeded(context, testUrl) {
   if (!MPG_EMAIL || !MPG_PASSWORD) {
     console.log("🔓 Login ignoré (MPG_EMAIL/MPG_PASSWORD non fournis).");
-    return;
+    return false;
   }
 
-  const page = await context.newPage();
+  let page = await context.newPage();
+  let logged = false;
+
   try {
     console.log("🔐 Tentative de login…");
 
-    // Essaye quelques URLs de login
-    const loginUrls = [
-      "https://mpg.football/login",
-      "https://mpg.football/auth/login",
-    ];
+    // 1) Homepage → bouton de connexion
+    await page.goto("https://mpg.football", { waitUntil: "domcontentloaded", timeout: 120_000 });
+    await acceptCookies(page);
+    await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await safeClick(page, [
+      'button:has-text("Je me connecte")',
+      'button:has-text("Se connecter")',
+      'a:has-text("Je me connecte")',
+      'a:has-text("Se connecter")',
+    ]);
+    await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => {});
+    await acceptCookies(page);
+    await fillLoginForm(page); // ignore le résultat, on enchaîne sur la vérif ci‑dessous
 
-    let logged = false;
-    for (const u of loginUrls) {
-      try {
-        await page.goto(u, { waitUntil: "domcontentloaded", timeout: 120_000 });
-        await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
+    // 2) Vérifie accès à une page protégée
+    if (testUrl) {
+      await page.goto(testUrl, { waitUntil: "domcontentloaded", timeout: 120_000 }).catch(() => {});
+      await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    }
 
-        // cookies/bandeau
-        await safeClick(page, [
-          'button:has-text("Accepter")',
-          'button:has-text("Accept")',
-          'button:has-text("Tout accepter")',
-          'button:has-text("OK")',
-        ]);
+    // heuristiques : si on n'est pas sur /login et pas la homepage marketing, on considère OK
+    const html1 = await page.content().catch(() => "");
+    const url1 = page.url();
+    if (!/\/login/i.test(url1) && !/Du foot, des amis/.test(html1)) {
+      logged = true;
+    }
 
-        // Champs email / mot de passe (plusieurs sélecteurs possibles)
-        const emailSel = ['input[name="email"]', 'input[type="email"]', '#email'];
-        const passSel = ['input[name="password"]', 'input[type="password"]', '#password'];
-
-        let foundEmail = false;
-        for (const s of emailSel) {
-          if (await page.locator(s).first().isVisible({ timeout: 1000 }).catch(() => false)) {
-            await page.fill(s, MPG_EMAIL);
-            foundEmail = true;
-            break;
-          }
+    // 3) Si pas OK, tente directement /login
+    if (!logged) {
+      await page.goto("https://mpg.football/login", { waitUntil: "domcontentloaded", timeout: 120_000 });
+      await acceptCookies(page);
+      if (await fillLoginForm(page)) {
+        if (testUrl) {
+          await page.goto(testUrl, { waitUntil: "domcontentloaded", timeout: 120_000 }).catch(() => {});
+          await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
         }
-
-        let foundPass = false;
-        for (const s of passSel) {
-          if (await page.locator(s).first().isVisible({ timeout: 1000 }).catch(() => false)) {
-            await page.fill(s, MPG_PASSWORD);
-            foundPass = true;
-            break;
-          }
-        }
-
-        // Si on n'a pas trouvé les champs, on tente l’autre URL
-        if (!foundEmail || !foundPass) continue;
-
-        await safeClick(page, [
-          'button[type="submit"]',
-          'button:has-text("Se connecter")',
-          'button:has-text("Login")',
-          'button:has-text("Sign in")',
-        ]);
-
-        await page.waitForLoadState("networkidle", { timeout: 120_000 });
-        const cur = page.url();
-        if (!/\/login/i.test(cur)) {
+        const html2 = await page.content().catch(() => "");
+        const url2 = page.url();
+        if (!/\/login/i.test(url2) && !/Du foot, des amis/.test(html2)) {
           logged = true;
-          break;
         }
-      } catch {}
+      }
     }
 
     console.log(logged ? "✅ Login OK" : "⚠️ Login non confirmé (on continue quand même).");
   } catch (e) {
-    console.warn("⚠️ Login impossible, on continue en mode invité :", e?.message || e);
+    console.warn("⚠️ Login: exception (on continue en invité) :", e?.message || e);
   } finally {
     await page.close().catch(() => {});
   }
+
+  return logged;
 }
 
 /* ======================== SCRAPING ======================== */
 
 async function scrapeLeague(context, code, url) {
-  const page = await context.newPage();
+  let page = await context.newPage();
   try {
     console.log(`▶️  ${code} → ${url || "(vide)"}`);
     if (!url) throw new Error(`URL manquante pour ${code}`);
 
-    // Charge la page
+    // 1) charge la page
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120_000 });
     await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
-    // Bandeau cookies éventuel
-    await safeClick(page, [
-      'button:has-text("Accepter")',
-      'button:has-text("Accept")',
-      'button:has-text("Tout accepter")',
-      'button:has-text("OK")',
-    ]);
+    await acceptCookies(page);
 
-    // Attente du tableau
+    // 2) si on est retombé sur homepage / login → tente login + retry une fois
+    let html = await page.content().catch(() => "");
+    if (/\/login/i.test(page.url()) || /Du foot, des amis/.test(html)) {
+      console.log(`🔁 ${code}: redirigé vers login/homepage → login + retry`);
+      await page.close().catch(() => {});
+      await loginIfNeeded(context, url);
+      page = await context.newPage();
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120_000 });
+      await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
+      await acceptCookies(page);
+      html = await page.content().catch(() => "");
+    }
+
+    // 3) attend le tableau
     await page.waitForSelector("table", { timeout: 120_000 }).catch(() => {});
     await sleep(1500);
 
-    // Lis les lignes
+    // 4) lit les lignes
     let rows = await page
       .$$eval("table tbody tr", (trs) =>
         trs.map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
       )
       .catch(() => []);
 
-    // Tentative alternative si vide
     if (!rows || rows.length === 0) {
       rows = await page
         .$$eval("table tr", (trs) =>
@@ -207,13 +243,11 @@ async function scrapeLeague(context, code, url) {
       throw new Error(`Aucune ligne de classement trouvée pour ${code}`);
     }
 
-    // En‑têtes
     const headers =
       (await page
         .$$eval("table thead th", (ths) => ths.map((th) => th.textContent.trim()))
         .catch(() => [])) || [];
 
-    // Index des colonnes
     const findIdx = (regex, fallback) => {
       const i = headers.findIndex((h) => regex.test(h || ""));
       return i !== -1 ? i : fallback;
@@ -222,7 +256,6 @@ async function scrapeLeague(context, code, url) {
     const idxPts = findIdx(/points|pts/i, Math.max(0, (headers.length || 1) - 1));
     const idxDiff = findIdx(/\+\/-|±|diff/i, Math.max(0, idxPts - 1));
 
-    // Map: team -> { pts, diff }
     const data = new Map();
     for (const row of rows) {
       if (!row || row.length === 0) continue;
@@ -272,13 +305,11 @@ function aggregate(leaguesData) {
     }
   }
 
-  // Totaux
   for (const t of teams.values()) {
     t.totalPts = ORDER.reduce((s, c) => s + (t[c].pts || 0), 0);
     t.totalDiff = ORDER.reduce((s, c) => s + (t[c].diff || 0), 0);
   }
 
-  // Min/Max par colonne
   const minPts = {};
   const maxPts = {};
   for (const code of ORDER) {
@@ -291,13 +322,11 @@ function aggregate(leaguesData) {
   const minDiffAll = Math.min(...Array.from(teams.values()).map((t) => t.totalDiff));
   const maxDiffAll = Math.max(...Array.from(teams.values()).map((t) => t.totalDiff));
 
-  // Décompte verts/rouges
   for (const t of teams.values()) {
     t.greens = ORDER.reduce((s, c) => s + (t[c].pts === maxPts[c] ? 1 : 0), 0);
     t.reds = ORDER.reduce((s, c) => s + (t[c].pts === minPts[c] ? 1 : 0), 0);
   }
 
-  // Tri : TOTAL ↓ → greens ↓ → reds ↑ → Diff ↓
   const rows = Array.from(teams.values()).sort((a, b) => {
     if (b.totalPts !== a.totalPts) return b.totalPts - a.totalPts;
     if (b.greens !== a.greens) return b.greens - a.greens;
@@ -396,12 +425,8 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
 
 (async () => {
   console.log("🚀 generate.mjs démarré", new Date().toISOString());
-
-  // Vérif URLs
   for (const k of ORDER) {
-    if (!LEAGUES[k]) {
-      console.warn(`⚠️ URL manquante pour ${k} (secret non défini ?)`);
-    }
+    if (!LEAGUES[k]) console.warn(`⚠️ URL manquante pour ${k} (secret non défini ?)`);
   }
 
   const browser = await chromium.launch({
@@ -410,8 +435,15 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
   });
 
   try {
-    const context = await browser.newContext();
-    await loginIfNeeded(context);
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      locale: "fr-FR",
+      timezoneId: "Europe/Paris",
+    });
+
+    // tente un login avant de scrapper
+    await loginIfNeeded(context, LEAGUES.FR || LEAGUES.EN || LEAGUES.ES || LEAGUES.IT);
 
     const leaguesData = {};
     for (const code of ORDER) {
