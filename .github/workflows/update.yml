@@ -34,4 +34,27 @@ jobs:
           MPG_PASSWORD: ${{ secrets.MPG_PASSWORD }}
           MPG_ESL_FR: ${{ secrets.MPG_ESL_FR }}
           MPG_ESL_UK: ${{ secrets.MPG_ESL_UK }}
-          MPG_ESL_E
+          MPG_ESL_ES: ${{ secrets.MPG_ESL_ES }}
+          MPG_ESL_IT: ${{ secrets.MPG_ESL_IT }}
+        run: |
+          mkdir -p docs
+          node scripts/generate.mjs
+
+      # Récupération des dumps Playwright pour debug (s'ils existent)
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpg-debug
+          path: |
+            dump-*.html
+            screenshot-*.png
+          if-no-files-found: ignore
+
+      - name: Push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/ -A
+          git commit -m "Update site [skip ci]" || echo "No changes to commit"
+          git push
