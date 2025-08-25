@@ -9,10 +9,10 @@ import path from "node:path";
    Tu peux aussi les passer via variables d'env MPG_FR / MPG_EN / MPG_ES / MPG_IT si tu préfères.
 */
 const LEAGUES = {
-  FR: process.env.MPG_FR || "https://mpg.football/league/....../ranking/general",
-  EN: process.env.MPG_EN || "https://mpg.football/league/....../ranking/general",
-  ES: process.env.MPG_ES || "https://mpg.football/league/....../ranking/general",
-  IT: process.env.MPG_IT || "https://mpg.football/league/....../ranking/general",
+  FR: "https://mpg.football/league/xxxxxx/mpg_division_xxxxxx_10_1/ranking/general",
+  EN: "https://mpg.football/league/xxxxxx/mpg_division_xxxxxx_10_1/ranking/general",
+  ES: "https://mpg.football/league/xxxxxx/mpg_division_xxxxxx_10_1/ranking/general",
+  IT: "https://mpg.football/league/xxxxxx/mpg_division_xxxxxx_10_1/ranking/general",
 };
 
 // Nom d’affichage et ordre des ligues
