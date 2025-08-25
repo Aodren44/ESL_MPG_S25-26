@@ -72,8 +72,9 @@ async function dumpForDebug(page, code) {
     const png = `screenshot-${code}.png`;
     const html = `dump-${code}.html`;
     await page.screenshot({ path: png, fullPage: true }).catch(() => {});
-    writeFileSync(html, await page.content());
-    console.log(`🧩 Debug dump written: ${png}, ${html}`);
+    const content = await page.content().catch(() => "");
+    if (content) writeFileSync(html, content);
+    console.log(`🧩 Debug dump written: ${png}${content ? `, ${html}` : ""}`);
   } catch (e) {
     console.log("⚠️ Dump failed:", e?.message || e);
   }
@@ -102,6 +103,7 @@ async function loginIfNeeded(context) {
       try {
         await page.goto(u, { waitUntil: "domcontentloaded", timeout: 120_000 });
         await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
+
         // cookies/bandeau
         await safeClick(page, [
           'button:has-text("Accepter")',
@@ -111,8 +113,8 @@ async function loginIfNeeded(context) {
         ]);
 
         // Champs email / mot de passe (plusieurs sélecteurs possibles)
-        const emailSel = ['input[name="email"]', 'input[type="email"]', 'input#email'];
-        const passSel = ['input[name="password"]', 'input[type="password"]', 'input#password'];
+        const emailSel = ['input[name="email"]', 'input[type="email"]', '#email'];
+        const passSel = ['input[name="password"]', 'input[type="password"]', '#password'];
 
         let foundEmail = false;
         for (const s of emailSel) {
@@ -122,6 +124,7 @@ async function loginIfNeeded(context) {
             break;
           }
         }
+
         let foundPass = false;
         for (const s of passSel) {
           if (await page.locator(s).first().isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -131,7 +134,7 @@ async function loginIfNeeded(context) {
           }
         }
 
-        // Si on n'a pas trouvé les champs, on tente l'autre URL
+        // Si on n'a pas trouvé les champs, on tente l’autre URL
         if (!foundEmail || !foundPass) continue;
 
         await safeClick(page, [
@@ -142,7 +145,6 @@ async function loginIfNeeded(context) {
         ]);
 
         await page.waitForLoadState("networkidle", { timeout: 120_000 });
-        // Heuristique : si après soumission on n’est plus sur la page de login, on considère OK
         const cur = page.url();
         if (!/\/login/i.test(cur)) {
           logged = true;
@@ -189,9 +191,8 @@ async function scrapeLeague(context, code, url) {
       )
       .catch(() => []);
 
-    // Tentative de récupération alternative si vide
+    // Tentative alternative si vide
     if (!rows || rows.length === 0) {
-      // parfois tbody est absent ou differemment structuré
       rows = await page
         .$$eval("table tr", (trs) =>
           trs
@@ -358,3 +359,78 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
 
         return `
           <tr>
+            <td class="rank">${i + 1}</td>
+            <td>${t.name}</td>
+            ${cellsLeagues}
+            <td class="${clsDiff}">${t.totalDiff}</td>
+            <td class="total ${clsTotal}">${t.totalPts}</td>
+          </tr>`;
+      })
+      .join("\n")}
+  </tbody>`.trim();
+
+  const html = `
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${PAGE_TITLE}</title>
+  ${style}
+</head>
+<body>
+  <h1>${PAGE_TITLE}</h1>
+  <div class="updated">Mis à jour automatiquement&nbsp;: ${updated}</div>
+  <table>
+    ${thead}
+    ${tbody}
+  </table>
+  <p class="foot">Verts = meilleure valeur de la colonne • Rouges = pire valeur de la colonne. Les couleurs de TOTAL et Diff +/- sont informatives (non prises en compte dans les tie‑breakers).</p>
+</body>
+</html>`.trim();
+
+  return html;
+}
+
+/* ======================== MAIN ======================== */
+
+(async () => {
+  console.log("🚀 generate.mjs démarré", new Date().toISOString());
+
+  // Vérif URLs
+  for (const k of ORDER) {
+    if (!LEAGUES[k]) {
+      console.warn(`⚠️ URL manquante pour ${k} (secret non défini ?)`);
+    }
+  }
+
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  try {
+    const context = await browser.newContext();
+    await loginIfNeeded(context);
+
+    const leaguesData = {};
+    for (const code of ORDER) {
+      leaguesData[code] = await scrapeLeague(context, code, LEAGUES[code]);
+    }
+
+    const aggregated = aggregate(leaguesData);
+    const html = buildHtml(aggregated);
+
+    if (OUTPUT_DIR !== "." && !existsSync(OUTPUT_DIR)) {
+      mkdirSync(OUTPUT_DIR, { recursive: true });
+    }
+    writeFileSync(OUTPUT_FILE, html, "utf8");
+    console.log(`💾 Page générée → ${OUTPUT_FILE}`);
+  } catch (e) {
+    console.error("❌ Erreur durant la génération :", e?.stack || e);
+    process.exitCode = 1;
+  } finally {
+    await browser.close().catch(() => {});
+    console.log("🏁 Terminé", new Date().toISOString());
+  }
+})();
