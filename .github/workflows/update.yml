@@ -39,6 +39,17 @@ jobs:
           mkdir -p docs
           node scripts/generate.mjs
 
+      # Récupération des dumps Playwright pour debug (s'ils existent)
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpg-debug
+          path: |
+            dump-*.html
+            screenshot-*.png
+          if-no-files-found: ignore
+
       - name: Push changes
         run: |
           git config --global user.name "github-actions[bot]"
