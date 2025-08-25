@@ -57,3 +57,10 @@ jobs:
           git add docs/ -A
           git commit -m "Update site [skip ci]" || echo "No changes to commit"
           git push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20   #  <-- ajoute cette ligne
+    permissions:
+      contents: write
+    ...
