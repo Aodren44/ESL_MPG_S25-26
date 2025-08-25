@@ -4,63 +4,57 @@ import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 
 /* ======================== CONFIG ======================== */
-
 const ORDER = ["FR", "EN", "ES", "IT"];
 const HEADERS = { FR: "🇫🇷", EN: "🇬🇧", ES: "🇪🇸", IT: "🇮🇹" };
 
+// Secrets
 const LEAGUES = {
   FR: process.env.MPG_ESL_FR || "",
   EN: process.env.MPG_ESL_UK || "",
   ES: process.env.MPG_ESL_ES || "",
   IT: process.env.MPG_ESL_IT || "",
 };
-
 const MPG_EMAIL = process.env.MPG_EMAIL || "";
 const MPG_PASSWORD = process.env.MPG_PASSWORD || "";
 
+// Sortie
 const OUTPUT_DIR = existsSync("docs") ? "docs" : ".";
 const OUTPUT_FILE = path.join(OUTPUT_DIR, "index.html");
-
 const PAGE_TITLE = "Classement MPG — European Star League — S25/26";
 
-for (const k of ORDER) {
-  console.log(`URL ${k}:`, LEAGUES[k] ? "(ok via secret)" : "(vide)");
-}
+// Logs secrets (sans afficher les URLs)
+for (const k of ORDER) console.log(`URL ${k}:`, LEAGUES[k] ? "(ok via secret)" : "(vide)");
 
 /* ======================== HELPERS ======================== */
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const nowFR = () => new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
 
 function parseIntSafe(raw, fallback = 0) {
   if (raw == null) return fallback;
   const m = String(raw).replace(/\u00A0/g, " ").match(/-?\d+/);
   return m ? parseInt(m[0], 10) : fallback;
 }
-
 function fmtDateFR(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(
+    d.getMinutes()
+  )}:${pad(d.getSeconds())}`;
 }
-
 function canonicalName(name) {
   return String(name || "").trim();
 }
-
 async function safeClick(page, selectors = []) {
   for (const sel of selectors) {
     try {
-      const loc = page.locator(sel).first();
-      if (await loc.isVisible({ timeout: 1200 }).catch(() => false)) {
-        await loc.click({ timeout: 2000 });
+      const el = page.locator(sel).first();
+      if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
+        await el.click({ timeout: 1500 });
         return true;
       }
     } catch {}
   }
   return false;
 }
-
 async function dumpForDebug(page, code) {
   try {
     const png = `screenshot-${code}.png`;
@@ -68,44 +62,27 @@ async function dumpForDebug(page, code) {
     await page.screenshot({ path: png, fullPage: true }).catch(() => {});
     const content = await page.content().catch(() => "");
     if (content) writeFileSync(html, content);
-    console.log(`🧩 Debug dump written: ${png}${content ? `, ${html}` : ""}`);
+    console.log(`🧩 Dump ${code}: ${png}${content ? `, ${html}` : ""}`);
   } catch {}
 }
 
-/* ======================== AUTH (LOGIN) ======================== */
-
+/* ======================== AUTH ======================== */
 async function acceptCookies(page) {
   await safeClick(page, [
     'button:has-text("Accepter")',
     'button:has-text("Accept")',
     'button:has-text("Tout accepter")',
-    'button:has-text("OK")',
     '[data-testid="uc-accept-all-button"]',
   ]);
 }
-
 async function fillLoginForm(page) {
-  const emailSel = ['input[name="email"]', 'input[type="email"]', '#email', 'input[placeholder*="mail"]'];
-  const passSel = ['input[name="password"]', 'input[type="password"]', '#password', 'input[placeholder*="mot de passe"]'];
-
-  let okE = false;
-  for (const s of emailSel) {
-    if (await page.locator(s).first().isVisible({ timeout: 800 }).catch(() => false)) {
-      await page.fill(s, MPG_EMAIL);
-      okE = true;
-      break;
-    }
-  }
-  let okP = false;
-  for (const s of passSel) {
-    if (await page.locator(s).first().isVisible({ timeout: 800 }).catch(() => false)) {
-      await page.fill(s, MPG_PASSWORD);
-      okP = true;
-      break;
-    }
-  }
+  const emails = ['input[name="email"]', 'input[type="email"]', '#email', 'input[placeholder*="mail" i]'];
+  const passes = ['input[name="password"]', 'input[type="password"]', '#password', 'input[placeholder*="mot de passe" i]'];
+  let okE = false,
+    okP = false;
+  for (const s of emails) if (await page.locator(s).first().isVisible().catch(() => false)) { await page.fill(s, MPG_EMAIL); okE = true; break; }
+  for (const s of passes) if (await page.locator(s).first().isVisible().catch(() => false)) { await page.fill(s, MPG_PASSWORD); okP = true; break; }
   if (!(okE && okP)) return false;
-
   await safeClick(page, [
     'button[type="submit"]',
     'button:has-text("Se connecter")',
@@ -113,143 +90,96 @@ async function fillLoginForm(page) {
     'button:has-text("Login")',
     'button:has-text("Sign in")',
   ]);
-
-  // laisse le temps aux redirections
-  await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
   return true;
 }
-
-/**
- * Essaie plusieurs parcours de login :
- * - Homepage → "Je me connecte" / "Se connecter" → remplir formulaire
- * - Accès direct /login
- * Puis vérifie en chargeant une URL de ligue.
- */
 async function loginIfNeeded(context, testUrl) {
   if (!MPG_EMAIL || !MPG_PASSWORD) {
     console.log("🔓 Login ignoré (MPG_EMAIL/MPG_PASSWORD non fournis).");
     return false;
   }
-
-  let page = await context.newPage();
-  let logged = false;
-
+  const page = await context.newPage();
   try {
     console.log("🔐 Tentative de login…");
-
-    // 1) Homepage → bouton de connexion
-    await page.goto("https://mpg.football", { waitUntil: "domcontentloaded", timeout: 120_000 });
+    await page.goto("https://mpg.football", { waitUntil: "domcontentloaded", timeout: 60000 });
     await acceptCookies(page);
-    await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     await safeClick(page, [
       'button:has-text("Je me connecte")',
       'button:has-text("Se connecter")',
       'a:has-text("Je me connecte")',
       'a:has-text("Se connecter")',
     ]);
-    await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => {});
+    await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
     await acceptCookies(page);
-    await fillLoginForm(page); // ignore le résultat, on enchaîne sur la vérif ci‑dessous
-
-    // 2) Vérifie accès à une page protégée
+    await fillLoginForm(page);
     if (testUrl) {
-      await page.goto(testUrl, { waitUntil: "domcontentloaded", timeout: 120_000 }).catch(() => {});
-      await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+      await page.goto(testUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+      await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
     }
-
-    // heuristiques : si on n'est pas sur /login et pas la homepage marketing, on considère OK
-    const html1 = await page.content().catch(() => "");
-    const url1 = page.url();
-    if (!/\/login/i.test(url1) && !/Du foot, des amis/.test(html1)) {
-      logged = true;
-    }
-
-    // 3) Si pas OK, tente directement /login
-    if (!logged) {
-      await page.goto("https://mpg.football/login", { waitUntil: "domcontentloaded", timeout: 120_000 });
-      await acceptCookies(page);
-      if (await fillLoginForm(page)) {
-        if (testUrl) {
-          await page.goto(testUrl, { waitUntil: "domcontentloaded", timeout: 120_000 }).catch(() => {});
-          await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
-        }
-        const html2 = await page.content().catch(() => "");
-        const url2 = page.url();
-        if (!/\/login/i.test(url2) && !/Du foot, des amis/.test(html2)) {
-          logged = true;
-        }
-      }
-    }
-
-    console.log(logged ? "✅ Login OK" : "⚠️ Login non confirmé (on continue quand même).");
+    const html = await page.content().catch(() => "");
+    const ok = !/\/login/i.test(page.url()) && !/Du foot, des amis/.test(html);
+    console.log(ok ? "✅ Login OK" : "⚠️ Login non confirmé (on continue quand même)");
+    return ok;
   } catch (e) {
-    console.warn("⚠️ Login: exception (on continue en invité) :", e?.message || e);
+    console.log("⚠️ Login: exception, on continue en invité:", e?.message || e);
+    return false;
   } finally {
     await page.close().catch(() => {});
   }
-
-  return logged;
 }
 
 /* ======================== SCRAPING ======================== */
-
 async function scrapeLeague(context, code, url) {
-  let page = await context.newPage();
+  const page = await context.newPage();
+  page.setDefaultTimeout(15000); // bornes strictes
   try {
     console.log(`▶️  ${code} → ${url || "(vide)"}`);
     if (!url) throw new Error(`URL manquante pour ${code}`);
-
-    // 1) charge la page
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120_000 });
-    await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
     await acceptCookies(page);
 
-    // 2) si on est retombé sur homepage / login → tente login + retry une fois
-    let html = await page.content().catch(() => "");
-    if (/\/login/i.test(page.url()) || /Du foot, des amis/.test(html)) {
+    // Si renvoyé vers login/homepage → une seule tentative de relog + retry
+    const firstHtml = await page.content().catch(() => "");
+    if (/\/login/i.test(page.url()) || /Du foot, des amis/.test(firstHtml)) {
       console.log(`🔁 ${code}: redirigé vers login/homepage → login + retry`);
       await page.close().catch(() => {});
       await loginIfNeeded(context, url);
-      page = await context.newPage();
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120_000 });
-      await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
-      await acceptCookies(page);
-      html = await page.content().catch(() => "");
+      return await scrapeLeague(context, code, url); // 1 retry borné par les timeouts ci‑dessus
     }
 
-    // 3) attend le tableau
-    await page.waitForSelector("table", { timeout: 120_000 }).catch(() => {});
-    await sleep(1500);
+    // Attend le tableau mais ne bloque pas indéfiniment
+    await page.waitForSelector("table", { timeout: 20000 }).catch(() => {});
+    await sleep(1000);
 
-    // 4) lit les lignes
-    let rows = await page
-      .$$eval("table tbody tr", (trs) =>
-        trs.map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
-      )
-      .catch(() => []);
-
-    if (!rows || rows.length === 0) {
-      rows = await page
-        .$$eval("table tr", (trs) =>
-          trs
-            .filter((tr) => tr.querySelectorAll("td").length > 0)
-            .map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
+    // Récupère lignes
+    let rows =
+      (await page
+        .$$eval("table tbody tr", (trs) =>
+          trs.map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
         )
-        .catch(() => []);
+        .catch(() => [])) || [];
+
+    if (!rows.length) {
+      rows =
+        (await page
+          .$eval("table", (tbl) =>
+            Array.from(tbl.querySelectorAll("tr"))
+              .filter((tr) => tr.querySelectorAll("td").length)
+              .map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
+          )
+          .catch(() => [])) || [];
     }
 
-    if (!rows || rows.length === 0) {
+    if (!rows.length) {
       await dumpForDebug(page, code);
       throw new Error(`Aucune ligne de classement trouvée pour ${code}`);
     }
 
     const headers =
-      (await page
-        .$$eval("table thead th", (ths) => ths.map((th) => th.textContent.trim()))
-        .catch(() => [])) || [];
-
-    const findIdx = (regex, fallback) => {
-      const i = headers.findIndex((h) => regex.test(h || ""));
+      (await page.$$eval("table thead th", (ths) => ths.map((th) => th.textContent.trim())).catch(() => [])) || [];
+    const findIdx = (re, fallback) => {
+      const i = headers.findIndex((h) => re.test(h || ""));
       return i !== -1 ? i : fallback;
     };
     const idxTeam = findIdx(/équipe|equipe|team/i, 1);
@@ -258,7 +188,7 @@ async function scrapeLeague(context, code, url) {
 
     const data = new Map();
     for (const row of rows) {
-      if (!row || row.length === 0) continue;
+      if (!row || !row.length) continue;
       const name = canonicalName(row[idxTeam] ?? row[1] ?? row[0]);
       const pts = parseIntSafe(row[idxPts], 0);
       const diff = parseIntSafe(row[idxDiff], 0);
@@ -266,25 +196,26 @@ async function scrapeLeague(context, code, url) {
       data.set(name, { pts, diff });
     }
 
-    if (data.size === 0) {
+    if (!data.size) {
       await dumpForDebug(page, code);
-      throw new Error(`Tableau lu mais aucune donnée exploitable pour ${code}`);
+      throw new Error(`Tableau lu mais vide pour ${code}`);
     }
 
-    console.log(`✅  ${code} : ${data.size} équipes lues`);
+    console.log(`✅ ${code}: ${data.size} équipes`);
     return data;
+  } catch (e) {
+    console.warn(`⚠️ ${code}: échec (${e?.message || e}). On continue avec 0. Voir dumps.`);
+    return new Map(); // tolérant : permet de finir la page
   } finally {
     await page.close().catch(() => {});
   }
 }
 
 /* ======================== AGREGE + CLASSE ======================== */
-
 function aggregate(leaguesData) {
   const teams = new Map();
-
   for (const code of ORDER) {
-    const map = leaguesData[code];
+    const map = leaguesData[code] || new Map();
     for (const [name, { pts, diff }] of map.entries()) {
       if (!teams.has(name)) {
         teams.set(name, {
@@ -304,23 +235,23 @@ function aggregate(leaguesData) {
       t[code].diff = diff;
     }
   }
-
   for (const t of teams.values()) {
     t.totalPts = ORDER.reduce((s, c) => s + (t[c].pts || 0), 0);
     t.totalDiff = ORDER.reduce((s, c) => s + (t[c].diff || 0), 0);
   }
 
-  const minPts = {};
-  const maxPts = {};
+  const minPts = {}, maxPts = {};
   for (const code of ORDER) {
     const vals = Array.from(teams.values()).map((t) => t[code].pts || 0);
-    minPts[code] = Math.min(...vals);
-    maxPts[code] = Math.max(...vals);
+    minPts[code] = vals.length ? Math.min(...vals) : 0;
+    maxPts[code] = vals.length ? Math.max(...vals) : 0;
   }
-  const minTotal = Math.min(...Array.from(teams.values()).map((t) => t.totalPts));
-  const maxTotal = Math.max(...Array.from(teams.values()).map((t) => t.totalPts));
-  const minDiffAll = Math.min(...Array.from(teams.values()).map((t) => t.totalDiff));
-  const maxDiffAll = Math.max(...Array.from(teams.values()).map((t) => t.totalDiff));
+  const totals = Array.from(teams.values()).map((t) => t.totalPts);
+  const diffs = Array.from(teams.values()).map((t) => t.totalDiff);
+  const minTotal = totals.length ? Math.min(...totals) : 0;
+  const maxTotal = totals.length ? Math.max(...totals) : 0;
+  const minDiffAll = diffs.length ? Math.min(...diffs) : 0;
+  const maxDiffAll = diffs.length ? Math.max(...diffs) : 0;
 
   for (const t of teams.values()) {
     t.greens = ORDER.reduce((s, c) => s + (t[c].pts === maxPts[c] ? 1 : 0), 0);
@@ -339,10 +270,8 @@ function aggregate(leaguesData) {
 }
 
 /* ======================== RENDU HTML ======================== */
-
 function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
   const updated = fmtDateFR(new Date());
-
   const style = `
   <style>
     :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; }
@@ -422,18 +351,11 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
 }
 
 /* ======================== MAIN ======================== */
-
 (async () => {
-  console.log("🚀 generate.mjs démarré", new Date().toISOString());
-  for (const k of ORDER) {
-    if (!LEAGUES[k]) console.warn(`⚠️ URL manquante pour ${k} (secret non défini ?)`);
-  }
+  console.log("🚀 generate.mjs démarré", nowFR());
+  for (const k of ORDER) if (!LEAGUES[k]) console.warn(`⚠️ URL manquante pour ${k}`);
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
-  });
-
+  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   try {
     const context = await browser.newContext({
       userAgent:
@@ -442,20 +364,20 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
       timezoneId: "Europe/Paris",
     });
 
-    // tente un login avant de scrapper
+    // tentative de login avant scraping
     await loginIfNeeded(context, LEAGUES.FR || LEAGUES.EN || LEAGUES.ES || LEAGUES.IT);
 
     const leaguesData = {};
     for (const code of ORDER) {
-      leaguesData[code] = await scrapeLeague(context, code, LEAGUES[code]);
+      const started = Date.now();
+      leaguesData[code] = await scrapeLeague(context, code, LEAGUES[code]).catch(() => new Map());
+      console.log(`⏱️ ${code} traité en ${(Date.now() - started) / 1000}s`);
     }
 
     const aggregated = aggregate(leaguesData);
     const html = buildHtml(aggregated);
 
-    if (OUTPUT_DIR !== "." && !existsSync(OUTPUT_DIR)) {
-      mkdirSync(OUTPUT_DIR, { recursive: true });
-    }
+    if (OUTPUT_DIR !== "." && !existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
     writeFileSync(OUTPUT_FILE, html, "utf8");
     console.log(`💾 Page générée → ${OUTPUT_FILE}`);
   } catch (e) {
@@ -463,6 +385,6 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
     process.exitCode = 1;
   } finally {
     await browser.close().catch(() => {});
-    console.log("🏁 Terminé", new Date().toISOString());
+    console.log("🏁 Terminé", nowFR());
   }
 })();
