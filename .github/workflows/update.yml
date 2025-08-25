@@ -2,15 +2,15 @@ name: Build & publish site
 
 on:
   schedule:
-    - cron: "0 7 * * *"     # tous les jours à 07:00 UTC (~09:00 Paris la plupart du temps)
+    - cron: "0 7 * * *"     # tous les jours à 07:00 UTC (~09:00 Paris)
   workflow_dispatch: {}      # bouton manuel "Run workflow"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10       # borne le job à 10 minutes max
+    timeout-minutes: 10
     permissions:
-      contents: write         # autoriser le push
+      contents: write
 
     steps:
       - name: Checkout repo
@@ -36,6 +36,7 @@ jobs:
           MPG_ESL_UK: ${{ secrets.MPG_ESL_UK }}
           MPG_ESL_ES: ${{ secrets.MPG_ESL_ES }}
           MPG_ESL_IT: ${{ secrets.MPG_ESL_IT }}
+          MPG_AUTH_STATE_B64: ${{ secrets.MPG_AUTH_STATE_B64 }} # optionnel si tu l'ajoutes plus tard
         run: |
           mkdir -p docs
           node scripts/generate.mjs
@@ -55,6 +56,9 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # se recaler sur la dernière version distante pour éviter "fetch first"
+          git fetch origin main
+          git reset --soft origin/main
           git add docs/ -A
           git commit -m "Update site [skip ci]" || echo "No changes to commit"
-          git push
+          git push origin HEAD:main
