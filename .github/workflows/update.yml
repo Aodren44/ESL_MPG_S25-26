@@ -31,7 +31,13 @@ jobs:
         env:
           MPG_EMAIL: ${{ secrets.MPG_EMAIL }}
           MPG_PASSWORD: ${{ secrets.MPG_PASSWORD }}
-        run: node scripts/generate.mjs
+          MPG_ESL_FR: ${{ secrets.MPG_ESL_FR }}
+          MPG_ESL_UK: ${{ secrets.MPG_ESL_UK }}
+          MPG_ESL_ES: ${{ secrets.MPG_ESL_ES }}
+          MPG_ESL_IT: ${{ secrets.MPG_ESL_IT }}
+        run: |
+          mkdir -p docs
+          node scripts/generate.mjs
 
       - name: Push changes
         run: |
