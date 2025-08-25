@@ -1,390 +1,377 @@
 // scripts/generate.mjs
 import { chromium } from "playwright";
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
-import path from "node:path";
+import { writeFileSync, mkdirSync } from "node:fs";
 
-/* ======================== CONFIG ======================== */
-const ORDER = ["FR", "EN", "ES", "IT"];
-const HEADERS = { FR: "🇫🇷", EN: "🇬🇧", ES: "🇪🇸", IT: "🇮🇹" };
-
-// Secrets
+// ▼▼ Logs de démarrage
+console.log("🚀 Script generate.mjs lancé à", new Date().toISOString());
+// --- CONFIG ---
 const LEAGUES = {
-  FR: process.env.MPG_ESL_FR || "",
-  EN: process.env.MPG_ESL_UK || "",
-  ES: process.env.MPG_ESL_ES || "",
-  IT: process.env.MPG_ESL_IT || "",
+  FR: "https://mpg.football/league/mpg_league_N382D585/mpg_division_N382D585_10_1/ranking/general",
+  EN: "https://mpg.football/league/mpg_league_N382L3SN/mpg_division_N382L3SN_10_1/ranking/general",
+  ES: "https://mpg.football/league/mpg_league_N382NGDF/mpg_division_N382NGDF_10_1/ranking/general",
+  IT: "https://mpg.football/league/mpg_league_N382M95P/mpg_division_N382M95P_10_1/ranking/general",
 };
-const MPG_EMAIL = process.env.MPG_EMAIL || "";
-const MPG_PASSWORD = process.env.MPG_PASSWORD || "";
-
-// Sortie
-const OUTPUT_DIR = existsSync("docs") ? "docs" : ".";
-const OUTPUT_FILE = path.join(OUTPUT_DIR, "index.html");
-const PAGE_TITLE = "Classement MPG — European Star League — S25/26";
-
-// Logs secrets (sans afficher les URLs)
-for (const k of ORDER) console.log(`URL ${k}:`, LEAGUES[k] ? "(ok via secret)" : "(vide)");
-
-/* ======================== HELPERS ======================== */
+const EMAIL = process.env.MPG_EMAIL;
+const PASSWORD = process.env.MPG_PASSWORD;
+if (!EMAIL || !PASSWORD) {
+  throw new Error("Secrets MPG_EMAIL / MPG_PASSWORD manquants.");
+}
+// --- HELPERS ---
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const nowFR = () => new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
-
-function parseIntSafe(raw, fallback = 0) {
-  if (raw == null) return fallback;
-  const m = String(raw).replace(/\u00A0/g, " ").match(/-?\d+/);
-  return m ? parseInt(m[0], 10) : fallback;
-}
-function fmtDateFR(d = new Date()) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(
-    d.getMinutes()
-  )}:${pad(d.getSeconds())}`;
-}
-function canonicalName(name) {
-  return String(name || "").trim();
-}
-async function safeClick(page, selectors = []) {
-  for (const sel of selectors) {
-    try {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
-        await el.click({ timeout: 1500 });
+const nowStr = () =>
+  new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
+/* ===========================
+   LOGIN (robuste: iframe/CTA)
+=========================== */
+async function login(page) {
+  console.log("🔐 login() start");
+// Cookies (page + iframes OneTrust)
+  async function acceptCookies() {
+    const selectors = [
+      "#onetrust-accept-btn-handler",
+      "button:has-text('Accepter')",
+      "button:has-text('Tout accepter')",
+      "button:has-text('Accept all')",
+      "button:has-text('Accept')",
+      "[aria-label*='accept']",
+    ];
+    let clicked = false;
+    for (const sel of selectors) {
+      try {
+        const btn = await page.$(sel);
+        if (btn) { await btn.click().catch(()=>{}); clicked = true; break; }
+      } catch {}
+    }
+    if (!clicked) {
+      for (const f of page.frames()) {
+        try {
+          const b = await f.$("#onetrust-accept-btn-handler");
+          if (b) { await b.click().catch(()=>{}); clicked = true; break; }
+        } catch {}
+      }
+    }
+    if (clicked) { console.log("🍪 cookies: accepté"); await page.waitForTimeout(300); }
+  }
+// Cherche un champ dans la page ou ses frames
+  async function findFieldAcrossFrames(selector) {
+    const frames = [page, ...page.frames()];
+    for (const f of frames) {
+      try {
+        const loc = f.locator(selector);
+        const handle = await loc.elementHandle({ timeout: 600 }).catch(()=>null);
+        if (handle) return { frame: f, locator: loc };
+      } catch {}
+    }
+    return null;
+  }
+// Clique un CTA "Se connecter"
+  async function clickLoginCTA() {
+    const selectors = [
+      "a[href*='/login']",
+      "a[href*='connexion']",
+      "button:has-text('Se connecter')",
+      "button:has-text('Connexion')",
+      "button:has-text('Login')",
+      "a:has-text('Se connecter')",
+      "a:has-text('Connexion')",
+      "[data-testid*='login']",
+    ];
+    for (const sel of selectors) {
+      const el = await page.$(sel).catch(()=>null);
+      if (el) {
+        console.log("▶️ clique CTA login:", sel);
+        await el.click().catch(()=>{});
+        await page.waitForLoadState("networkidle").catch(()=>{});
+        await page.waitForTimeout(700);
         return true;
+      }
+    }
+    return false;
+  }
+// 1) Aller sur la home
+  console.log("→ GOTO home");
+  await page.goto("https://mpg.football/", { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
+  await page.waitForTimeout(800);
+  await acceptCookies();
+
+// 2) Essayer les URLs directes de login
+  const loginUrls = [
+    "https://mpg.football/login",
+    "https://mpg.football/connexion",
+    "https://mpg.football/auth/login",
+  ];
+  for (const u of loginUrls) {
+    console.log("→ tentative URL login:", u);
+    await page.goto(u, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(()=>{});
+    await page.waitForTimeout(600);
+    await acceptCookies();
+
+const found = await findFieldAcrossFrames("input[type='email'], input[name='email'], #email, input[autocomplete='email']");
+    if (found) { console.log("✅ Champ email trouvé via URL directe, frame:", found.frame.url()); break; }
+  }
+// 3) Sinon, cliquer un CTA
+  let emailField = await findFieldAcrossFrames("input[type='email'], input[name='email'], #email, input[autocomplete='email']");
+  if (!emailField) {
+    const clicked = await clickLoginCTA();
+    if (clicked) {
+      emailField = await findFieldAcrossFrames("input[type='email'], input[name='email'], #email, input[autocomplete='email']");
+    }
+  }
+  if (!emailField) throw new Error("Formulaire de connexion introuvable (email).");
+// 4) Mot de passe (même frame)
+  const pwdField = await findFieldAcrossFrames("input[type='password'], input[name='password'], #password, input[autocomplete='current-password']");
+  if (!pwdField) throw new Error("Champ mot de passe introuvable.");
+await emailField.locator.fill(EMAIL, { timeout: 30000 });
+  await pwdField.locator.fill(PASSWORD, { timeout: 30000 });
+// 5) Soumettre
+  const submitSelectors = [
+    "button[type='submit']",
+    "button:has-text('Se connecter')",
+    "button:has-text('Connexion')",
+    "button:has-text('Log in')",
+    "button:has-text('Login')",
+    "input[type='submit']",
+  ];
+  let submitted = false;
+  for (const sel of submitSelectors) {
+    try {
+      const btn = await emailField.frame.$(sel);
+      if (btn) {
+        await btn.click().catch(()=>{});
+        console.log("📨 Credentials soumis (via:", sel, ")");
+        submitted = true;
+        break;
       }
     } catch {}
   }
+  if (!submitted) { try { await pwdField.locator.press("Enter"); console.log("↩️ Submit via Enter"); } catch {} }
+await page.waitForLoadState("networkidle", { timeout: 60000 }).catch(()=>{});
+  await page.waitForURL(/mpg\.football\/(dashboard|league)/, { timeout: 60000 }).catch(()=>{});
+  console.log("✅ Login tenté, url actuelle:", page.url());
+}
+// helper à coller AU-DESSUS de scrapeLeague
+async function gotoWithRetry(page, url, tries = 3) {
+  for (let i = 1; i <= tries; i++) {
+    try {
+      console.log(`↻ goto try ${i}/${tries}:`, url);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+      // on laisse l’app SPA charger un peu
+      await page.waitForLoadState("networkidle", { timeout: 6000 }).catch(() => {});
+      return true;
+    } catch (e) {
+      console.log("   goto fail:", e?.message);
+      if (i === tries) return false;
+    }
+  }
   return false;
 }
-async function dumpForDebug(page, code) {
+
+// === SCRAPER ===
+async function scrapeLeague(page, url) {
+  const out = [];
+// 1) navigation robuste (corrige FR)
+  const ok = await gotoWithRetry(page, url, 3);
+  if (!ok) {
+    console.log("⚠️ impossible de charger la page de ligue", url);
+    return out;
+  }
+// 2) attendre le tableau avec plusieurs stratégies (corrige IT)
+  //   a) nos sélecteurs cibles
+  const wanted = '[data-testid="ranking-row"], table, [role="table"]';
   try {
-    const png = `screenshot-${code}.png`;
-    const html = `dump-${code}.html`;
-    await page.screenshot({ path: png, fullPage: true }).catch(() => {});
-    const content = await page.content().catch(() => "");
-    if (content) writeFileSync(html, content);
-    console.log(`🧩 Dump ${code}: ${png}${content ? `, ${html}` : ""}`);
+    await page.waitForSelector(wanted, { timeout: 8000 });
   } catch {}
-}
-
-/* ======================== AUTH ======================== */
-async function acceptCookies(page) {
-  await safeClick(page, [
-    'button:has-text("Accepter")',
-    'button:has-text("Accept")',
-    'button:has-text("Tout accepter")',
-    '[data-testid="uc-accept-all-button"]',
-  ]);
-}
-async function fillLoginForm(page) {
-  const emails = ['input[name="email"]', 'input[type="email"]', '#email', 'input[placeholder*="mail" i]'];
-  const passes = ['input[name="password"]', 'input[type="password"]', '#password', 'input[placeholder*="mot de passe" i]'];
-  let okE = false,
-    okP = false;
-  for (const s of emails) if (await page.locator(s).first().isVisible().catch(() => false)) { await page.fill(s, MPG_EMAIL); okE = true; break; }
-  for (const s of passes) if (await page.locator(s).first().isVisible().catch(() => false)) { await page.fill(s, MPG_PASSWORD); okP = true; break; }
-  if (!(okE && okP)) return false;
-  await safeClick(page, [
-    'button[type="submit"]',
-    'button:has-text("Se connecter")',
-    'button:has-text("Je me connecte")',
-    'button:has-text("Login")',
-    'button:has-text("Sign in")',
-  ]);
-  await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
-  return true;
-}
-async function loginIfNeeded(context, testUrl) {
-  if (!MPG_EMAIL || !MPG_PASSWORD) {
-    console.log("🔓 Login ignoré (MPG_EMAIL/MPG_PASSWORD non fournis).");
-    return false;
-  }
-  const page = await context.newPage();
+//   b) si toujours rien de visible, attendre qu’il y ait des lignes utilisables
   try {
-    console.log("🔐 Tentative de login…");
-    await page.goto("https://mpg.football", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await acceptCookies(page);
-    await safeClick(page, [
-      'button:has-text("Je me connecte")',
-      'button:has-text("Se connecter")',
-      'a:has-text("Je me connecte")',
-      'a:has-text("Se connecter")',
-    ]);
-    await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
-    await acceptCookies(page);
-    await fillLoginForm(page);
-    if (testUrl) {
-      await page.goto(testUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-      await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    }
-    const html = await page.content().catch(() => "");
-    const ok = !/\/login/i.test(page.url()) && !/Du foot, des amis/.test(html);
-    console.log(ok ? "✅ Login OK" : "⚠️ Login non confirmé (on continue quand même)");
-    return ok;
+    await page.waitForFunction(() => {
+      const rankRows = document.querySelectorAll('[data-testid="ranking-row"]').length;
+      const tableRows = Array.from(document.querySelectorAll("table tr, [role=table] tr"))
+        .filter(tr => tr.querySelectorAll("td").length > 1).length;
+      return rankRows > 0 || tableRows > 2;
+    }, { timeout: 8000 });
   } catch (e) {
-    console.log("⚠️ Login: exception, on continue en invité:", e?.message || e);
-    return false;
-  } finally {
-    await page.close().catch(() => {});
+    console.log("⚠️ pas de structure de tableau détectée:", e?.message);
+    // on continue quand même, le fallback ci‑dessous tentera un parse large
   }
-}
-
-/* ======================== SCRAPING ======================== */
-async function scrapeLeague(context, code, url) {
-  const page = await context.newPage();
-  page.setDefaultTimeout(15000); // bornes strictes
-  try {
-    console.log(`▶️  ${code} → ${url || "(vide)"}`);
-    if (!url) throw new Error(`URL manquante pour ${code}`);
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await acceptCookies(page);
-
-    // Si renvoyé vers login/homepage → une seule tentative de relog + retry
-    const firstHtml = await page.content().catch(() => "");
-    if (/\/login/i.test(page.url()) || /Du foot, des amis/.test(firstHtml)) {
-      console.log(`🔁 ${code}: redirigé vers login/homepage → login + retry`);
-      await page.close().catch(() => {});
-      await loginIfNeeded(context, url);
-      return await scrapeLeague(context, code, url); // 1 retry borné par les timeouts ci‑dessus
-    }
-
-    // Attend le tableau mais ne bloque pas indéfiniment
-    await page.waitForSelector("table", { timeout: 20000 }).catch(() => {});
-    await sleep(1000);
-
-    // Récupère lignes
-    let rows =
-      (await page
-        .$$eval("table tbody tr", (trs) =>
-          trs.map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
-        )
-        .catch(() => [])) || [];
-
-    if (!rows.length) {
-      rows =
-        (await page
-          .$eval("table", (tbl) =>
-            Array.from(tbl.querySelectorAll("tr"))
-              .filter((tr) => tr.querySelectorAll("td").length)
-              .map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
-          )
-          .catch(() => [])) || [];
-    }
-
-    if (!rows.length) {
-      await dumpForDebug(page, code);
-      throw new Error(`Aucune ligne de classement trouvée pour ${code}`);
-    }
-
-    const headers =
-      (await page.$$eval("table thead th", (ths) => ths.map((th) => th.textContent.trim())).catch(() => [])) || [];
-    const findIdx = (re, fallback) => {
-      const i = headers.findIndex((h) => re.test(h || ""));
-      return i !== -1 ? i : fallback;
-    };
-    const idxTeam = findIdx(/équipe|equipe|team/i, 1);
-    const idxPts = findIdx(/points|pts/i, Math.max(0, (headers.length || 1) - 1));
-    const idxDiff = findIdx(/\+\/-|±|diff/i, Math.max(0, idxPts - 1));
-
-    const data = new Map();
-    for (const row of rows) {
-      if (!row || !row.length) continue;
-      const name = canonicalName(row[idxTeam] ?? row[1] ?? row[0]);
-      const pts = parseIntSafe(row[idxPts], 0);
-      const diff = parseIntSafe(row[idxDiff], 0);
-      if (!name) continue;
-      data.set(name, { pts, diff });
-    }
-
-    if (!data.size) {
-      await dumpForDebug(page, code);
-      throw new Error(`Tableau lu mais vide pour ${code}`);
-    }
-
-    console.log(`✅ ${code}: ${data.size} équipes`);
-    return data;
-  } catch (e) {
-    console.warn(`⚠️ ${code}: échec (${e?.message || e}). On continue avec 0. Voir dumps.`);
-    return new Map(); // tolérant : permet de finir la page
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-/* ======================== AGREGE + CLASSE ======================== */
-function aggregate(leaguesData) {
-  const teams = new Map();
-  for (const code of ORDER) {
-    const map = leaguesData[code] || new Map();
-    for (const [name, { pts, diff }] of map.entries()) {
-      if (!teams.has(name)) {
-        teams.set(name, {
-          name,
-          FR: { pts: 0, diff: 0 },
-          EN: { pts: 0, diff: 0 },
-          ES: { pts: 0, diff: 0 },
-          IT: { pts: 0, diff: 0 },
-          totalPts: 0,
-          totalDiff: 0,
-          greens: 0,
-          reds: 0,
-        });
+// 3) chemin 1 : lignes balisées par data-testid
+  const rows = await page.$$('[data-testid="ranking-row"]');
+  if (rows.length > 0) {
+    console.log("   rows[data-testid=ranking-row] =", rows.length);
+    for (const r of rows) {
+      const name =
+        (await r.locator(".team-name, .name, [data-testid=team-name]").textContent().catch(() => null))?.trim()
+        ?? (await r.textContent() || "").trim();
+let ptsText =
+        (await r.locator(".points, .pts, [data-testid*=points]").textContent().catch(() => null)) ?? "";
+if (!ptsText) {
+        const all = (await r.textContent()) || "";
+        const nums = all.match(/\d+/g) || [];
+        ptsText = nums.length ? nums[nums.length - 1] : "";
       }
-      const t = teams.get(name);
-      t[code].pts = pts;
-      t[code].diff = diff;
+const points = Number.parseInt(String(ptsText).replace(",", "."), 10);
+      if (name && Number.isFinite(points)) out.push({ team: name, points });
+    }
+    return out;
+  }
+// 4) chemin 2 : fallback tableau générique (plus permissif)
+  const trs = await page.$$("table tr, [role=table] tr, div[role='row']");
+  let found = 0;
+  for (const tr of trs) {
+    // on prend seulement les lignes avec au moins 2 cellules “données”
+    const tds = await tr.$$("td, [role='cell'], th, div");
+    if (tds.length < 2) continue;
+
+let team = null;
+    let points = null;
+for (const el of tds) {
+      const txt = ((await el.textContent()) || "").trim();
+      if (!team && /[A-Za-zÀ-ÿ]/.test(txt) && txt.length > 1) team = txt;
+      if (!points) {
+        const m = txt.match(/^\d+$/);
+        if (m) points = Number.parseInt(m[0], 10);
+      }
+    }
+if (team && Number.isFinite(points)) {
+      out.push({ team, points });
+      found++;
     }
   }
-  for (const t of teams.values()) {
-    t.totalPts = ORDER.reduce((s, c) => s + (t[c].pts || 0), 0);
-    t.totalDiff = ORDER.reduce((s, c) => s + (t[c].diff || 0), 0);
-  }
-
-  const minPts = {}, maxPts = {};
-  for (const code of ORDER) {
-    const vals = Array.from(teams.values()).map((t) => t[code].pts || 0);
-    minPts[code] = vals.length ? Math.min(...vals) : 0;
-    maxPts[code] = vals.length ? Math.max(...vals) : 0;
-  }
-  const totals = Array.from(teams.values()).map((t) => t.totalPts);
-  const diffs = Array.from(teams.values()).map((t) => t.totalDiff);
-  const minTotal = totals.length ? Math.min(...totals) : 0;
-  const maxTotal = totals.length ? Math.max(...totals) : 0;
-  const minDiffAll = diffs.length ? Math.min(...diffs) : 0;
-  const maxDiffAll = diffs.length ? Math.max(...diffs) : 0;
-
-  for (const t of teams.values()) {
-    t.greens = ORDER.reduce((s, c) => s + (t[c].pts === maxPts[c] ? 1 : 0), 0);
-    t.reds = ORDER.reduce((s, c) => s + (t[c].pts === minPts[c] ? 1 : 0), 0);
-  }
-
-  const rows = Array.from(teams.values()).sort((a, b) => {
-    if (b.totalPts !== a.totalPts) return b.totalPts - a.totalPts;
-    if (b.greens !== a.greens) return b.greens - a.greens;
-    if (a.reds !== b.reds) return a.reds - b.reds;
-    if (b.totalDiff !== a.totalDiff) return b.totalDiff - a.totalDiff;
-    return 0;
-  });
-
-  return { rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll };
+  console.log("   rows<table> (fallback) =", found);
+  return out;
 }
-
-/* ======================== RENDU HTML ======================== */
-function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
-  const updated = fmtDateFR(new Date());
-  const style = `
-  <style>
-    :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 32px; }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    .updated { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: right; }
-    th:nth-child(2), td:nth-child(2) { text-align: left; }
-    th { font-weight: 600; }
-    tr:hover td { background: #fafafa; }
-    .tag-green { background: #e6ffed; }
-    .tag-red { background: #ffecec; }
-    .rank { width: 42px; color: var(--muted); }
-    .team { width: 280px; }
-    .total { font-weight: 700; }
-    .foot { color: var(--muted); font-size: 12px; margin-top: 10px; }
-  </style>`.trim();
-
-  const thead = `
-  <thead>
-    <tr>
-      <th class="rank">#</th>
-      <th class="team">Équipe</th>
-      ${ORDER.map((c) => `<th title="${c}">${HEADERS[c]}</th>`).join("")}
-      <th title="Différence de buts cumulée">Diff +/-</th>
-      <th class="total" title="Points cumulés">TOTAL</th>
-    </tr>
-  </thead>`.trim();
-
-  const tbody = `
-  <tbody>
-    ${rows
-      .map((t, i) => {
-        const cellsLeagues = ORDER.map((c) => {
-          const v = t[c].pts || 0;
-          const cls = v === maxPts[c] ? "tag-green" : v === minPts[c] ? "tag-red" : "";
-          return `<td class="${cls}">${v}</td>`;
-        }).join("");
-
-        const clsTotal = t.totalPts === maxTotal ? "tag-green" : t.totalPts === minTotal ? "tag-red" : "";
-        const clsDiff = t.totalDiff === maxDiffAll ? "tag-green" : t.totalDiff === minDiffAll ? "tag-red" : "";
-
-        return `
-          <tr>
-            <td class="rank">${i + 1}</td>
-            <td>${t.name}</td>
-            ${cellsLeagues}
-            <td class="${clsDiff}">${t.totalDiff}</td>
-            <td class="total ${clsTotal}">${t.totalPts}</td>
-          </tr>`;
-      })
-      .join("\n")}
-  </tbody>`.trim();
-
-  const html = `
-<!DOCTYPE html>
+/* ===== AGRÉGATION + RENDU ===== */
+function aggregate(leagues) {
+  const columns = ["FR", "EN", "ES", "IT"];
+  const teams = new Set();
+  for (const c of columns) for (const row of leagues[c] || []) teams.add(row.team);
+const byTeam = {};
+  for (const team of teams) {
+    const pts = Object.fromEntries(
+      columns.map((c) => [c, (leagues[c] || []).find((x) => x.team === team)?.points ?? 0])
+    );
+    const total = columns.reduce((s, c) => s + pts[c], 0);
+    byTeam[team] = { team, ...pts, total };
+  }
+const maxPerCol = Object.fromEntries(
+    ["FR", "EN", "ES", "IT"].map((c) => [c, Math.max(0, ...Object.values(byTeam).map((x) => x[c]))])
+  );
+  const minPerCol = Object.fromEntries(
+    ["FR", "EN", "ES", "IT"].map((c) => [c, Math.min(...Object.values(byTeam).map((x) => x[c]))])
+  );
+for (const t of Object.values(byTeam)) {
+    t.wins  = ["FR", "EN", "ES", "IT"].filter((c) => t[c] === maxPerCol[c]).length;
+    t.lasts = ["FR", "EN", "ES", "IT"].filter((c) => t[c] === minPerCol[c]).length;
+  }
+const table = Object.values(byTeam).sort(
+    (a, b) =>
+      b.total - a.total ||
+      b.wins - a.wins ||
+      a.lasts - b.lasts ||
+      a.team.localeCompare(b.team)
+  );
+  table.forEach((r, i) => (r.rank = i + 1));
+  return table;
+}
+function renderHTML(table) {
+  const genAt = nowStr();
+  const th = (txt) => `<th>${txt}</th>`;
+  const td = (txt, cls = "") => `<td class="${cls}">${txt}</td>`;
+const columns = ["FR", "EN", "ES", "IT"];
+  const max = Object.fromEntries(columns.map((c) => [c, Math.max(...table.map((r) => r[c] ?? 0))]));
+  const min = Object.fromEntries(columns.map((c) => [c, Math.min(...table.map((r) => r[c] ?? 0))]));
+const rows = table
+    .map((r) => {
+      const cells = columns
+        .map((c) => {
+          const cls = r[c] === max[c] ? "best" : r[c] === min[c] ? "worst" : "";
+          return td(r[c], cls);
+        })
+        .join("");
+      return `<tr>
+        ${td(r.rank)}
+        ${td(r.team)}
+        ${cells}
+        ${td(`<strong>${r.total}</strong>`)}
+        ${td(r.wins)}
+        ${td(r.lasts)}
+      </tr>`;
+    })
+    .join("\n");
+return `<!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
+  <title>Classement MPG — Global</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${PAGE_TITLE}</title>
-  ${style}
+  <style>
+    :root { --bg:#fff; --fg:#111; --muted:#666; --border:#e5e7eb; --best:#e6ffed; --worst:#ffecec;}
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--fg); margin:40px auto; max-width:1100px; padding:0 16px; }
+    .card { border:1px solid var(--border); border-radius:14px; padding:22px; box-shadow:0 1px 2px rgba(0,0,0,.03); }
+    h1 { margin:0 0 6px 0; font-size:28px; }
+    small { color:var(--muted); }
+    table { width:100%; border-collapse: collapse; margin-top:14px; }
+    th, td { padding:10px 12px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+    thead th { background:#fafafa; position:sticky; top:0; }
+    tr:hover td { background:#fafafa; }
+    td.best { background: var(--best); font-weight:600; }
+    td.worst { background: var(--worst); }
+    .legend { margin-top:10px; color:var(--muted); font-size:14px; }
+  </style>
 </head>
 <body>
-  <h1>${PAGE_TITLE}</h1>
-  <div class="updated">Mis à jour automatiquement&nbsp;: ${updated}</div>
-  <table>
-    ${thead}
-    ${tbody}
-  </table>
-  <p class="foot">Verts = meilleure valeur de la colonne • Rouges = pire valeur de la colonne. Les couleurs de TOTAL et Diff +/- sont informatives (non prises en compte dans les tie‑breakers).</p>
+  <div class="card">
+    <h1>Classement MPG — Global</h1>
+    <p><small>Mis à jour automatiquement : ${genAt}</small></p>
+    <table>
+      <thead>
+        <tr>
+          ${th("#")}
+          ${th("Équipe")}
+          ${th("FR")}
+          ${th("EN")}
+          ${th("ES")}
+          ${th("IT")}
+          ${th("Total")}
+          ${th("Verts")}
+          ${th("Rouges")}
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="legend">Verts = meilleur score de la ligue ; Rouges = plus petit score de la ligue (sert aux tie-breakers).</div>
+  </div>
 </body>
-</html>`.trim();
-
-  return html;
+</html>`;
 }
 
-/* ======================== MAIN ======================== */
-(async () => {
-  console.log("🚀 generate.mjs démarré", nowFR());
-  for (const k of ORDER) if (!LEAGUES[k]) console.warn(`⚠️ URL manquante pour ${k}`);
-
-  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
-  try {
-    const context = await browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      locale: "fr-FR",
-      timezoneId: "Europe/Paris",
-    });
-
-    // tentative de login avant scraping
-    await loginIfNeeded(context, LEAGUES.FR || LEAGUES.EN || LEAGUES.ES || LEAGUES.IT);
-
-    const leaguesData = {};
-    for (const code of ORDER) {
-      const started = Date.now();
-      leaguesData[code] = await scrapeLeague(context, code, LEAGUES[code]).catch(() => new Map());
-      console.log(`⏱️ ${code} traité en ${(Date.now() - started) / 1000}s`);
+// === MAIN ===
+async function main() {
+  // Sur runner GitHub: pas de sandbox
+  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  const page = await browser.newPage();
+await login(page);
+const leagues = {};
+  for (const [code, url] of Object.entries(LEAGUES)) {
+    try {
+      const rows = await scrapeLeague(page, url);
+      leagues[code] = rows;
+      console.log(`✅ ${code} -> ${rows.length} équipes`);
+    } catch (e) {
+      console.log(`⚠️ ${code} indisponible:`, e?.message);
+      leagues[code] = [];
     }
-
-    const aggregated = aggregate(leaguesData);
-    const html = buildHtml(aggregated);
-
-    if (OUTPUT_DIR !== "." && !existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
-    writeFileSync(OUTPUT_FILE, html, "utf8");
-    console.log(`💾 Page générée → ${OUTPUT_FILE}`);
-  } catch (e) {
-    console.error("❌ Erreur durant la génération :", e?.stack || e);
-    process.exitCode = 1;
-  } finally {
-    await browser.close().catch(() => {});
-    console.log("🏁 Terminé", nowFR());
+    await sleep(300);
   }
-})();
+await browser.close();
+const table = aggregate(leagues);
+  console.log("📊 total équipes agrégées:", table.length);
+mkdirSync("docs", { recursive: true });
+  writeFileSync("docs/index.html", renderHTML(table), "utf8");
+  console.log("📝 écrit: docs/index.html");
+console.log("✅ Page générée avec", table.length, "équipes :", nowStr());
+}
+// Lancer + log d'erreur fatal si besoin
+main().catch((e) => {
+  console.error("💥 Erreur fatale:", e);
+  process.exit(1);
+});
