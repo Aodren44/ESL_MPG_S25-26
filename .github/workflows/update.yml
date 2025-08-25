@@ -8,8 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20       # <-- borne le job à 20 minutes max
     permissions:
-      contents: write        # autoriser le push
+      contents: write         # autoriser le push
 
     steps:
       - name: Checkout repo
@@ -57,10 +58,3 @@ jobs:
           git add docs/ -A
           git commit -m "Update site [skip ci]" || echo "No changes to commit"
           git push
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20   #  <-- ajoute cette ligne
-    permissions:
-      contents: write
-    ...
