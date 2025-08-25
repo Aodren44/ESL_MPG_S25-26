@@ -1,26 +1,26 @@
 // scripts/generate.mjs
 import { chromium } from "playwright";
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
 
 /* ======================== CONFIG ======================== */
-/*
-   ⚠️ Laisse tes 4 URL ici (celles que tu avais déjà).
-   Tu peux aussi les passer via variables d'env MPG_FR / MPG_EN / MPG_ES / MPG_IT si tu préfères.
-*/
+
+// Ordre d’affichage + en-têtes
+const ORDER = ["FR", "EN", "ES", "IT"];
+const HEADERS = { FR: "🇫🇷", EN: "🇬🇧", ES: "🇪🇸", IT: "🇮🇹" };
+
+// URLs lues depuis les secrets du workflow
 const LEAGUES = {
   FR: process.env.MPG_ESL_FR || "",
   EN: process.env.MPG_ESL_UK || "",
   ES: process.env.MPG_ESL_ES || "",
   IT: process.env.MPG_ESL_IT || "",
 };
+
+// (optionnel) petit log pour vérifier que les secrets sont bien injectés
 for (const k of ORDER) {
   console.log(`URL ${k}:`, LEAGUES[k] ? "(ok via secret)" : "(vide)");
 }
-
-// Nom d’affichage et ordre des ligues
-const ORDER = ["FR", "EN", "ES", "IT"];
-const HEADERS = { FR: "🇫🇷", EN: "🇬🇧", ES: "🇪🇸", IT: "🇮🇹" };
 
 // Où écrire la page (auto‑détection docs/ → sinon racine)
 const OUTPUT_DIR = existsSync("docs") ? "docs" : ".";
@@ -28,6 +28,7 @@ const OUTPUT_FILE = path.join(OUTPUT_DIR, "index.html");
 
 // Titre demandé
 const PAGE_TITLE = "Classement MPG — European Star League — S25/26";
+
 
 /* ======================== HELPERS ======================== */
 
