@@ -1,0 +1,88 @@
+/* ====== TABLE COMPACTE ====== */
+.table-mpg {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+.table-mpg th, .table-mpg td {
+  padding: 10px 8px;
+  vertical-align: middle;
+}
+.table-mpg th:first-child, .table-mpg td:first-child { /* colonne # */
+  width: 36px;
+  text-align: center;
+}
+.table-mpg th.col-team, .table-mpg td.col-team {
+  width: 1%;
+  white-space: nowrap;               /* compacte la colonne Équipe */
+}
+.table-mpg th.col-pts, .table-mpg td.col-pts {
+  width: 48px;                       /* colonnes FR/GB/ES/IT */
+  text-align: center;
+}
+.table-mpg th.col-diff, .table-mpg td.col-diff { width: 68px; text-align:center; }
+.table-mpg th.col-total, .table-mpg td.col-total { width: 80px; text-align:center; }
+
+/* Drapeaux en en-tête (SVG) */
+.flag {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+}
+.flag img { width: 100%; height: 100%; display:block; }
+
+/* ====== MOBILE-FIRST (≤ 720px) ====== */
+@media (max-width: 720px) {
+  .table-mpg thead { display: none; }
+  .table-mpg, .table-mpg tbody, .table-mpg tr, .table-mpg td { display: block; width: 100%; }
+  .table-mpg tr {
+    border: 1px solid #eee;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.04);
+    background: #fff;
+  }
+
+  /* Carte : top row = # + équipe + TOTAL */
+  .table-mpg td[data-key="rank"] {
+    float: right;
+    font-weight: 600;
+    color: #999;
+  }
+  .table-mpg td[data-key="team"] {
+    font-weight: 700;
+    font-size: 1.05rem;
+    padding-right: 70px;
+  }
+  .table-mpg td[data-key="total"] {
+    position: absolute;
+    right: 18px;
+    margin-top: -28px;
+    font-weight: 800;
+    font-size: 1.05rem;
+    padding: 0;
+  }
+
+  /* Grille compacte pour FR/GB/ES/IT + Diff */
+  .table-mpg td[data-key="fr"],
+  .table-mpg td[data-key="gb"],
+  .table-mpg td[data-key="es"],
+  .table-mpg td[data-key="it"],
+  .table-mpg td[data-key="diff"] {
+    display: grid;
+    grid-template-columns: 22px auto;   /* drapeau + valeur */
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+  }
+  .table-mpg td::before {
+    content: attr(data-label);           /* libellé visible en mobile */
+    font-weight: 600;
+    color: #666;
+  }
+
+  .table-mpg td { padding: 6px 0; }
+  .table-mpg tr::after { content: ""; display: block; clear: both; }
+}
