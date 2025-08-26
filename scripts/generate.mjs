@@ -362,109 +362,109 @@ function aggregate(leaguesData) {
 }
 
 /* ======================== RENDU HTML ======================== */
-function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
-  const updated = fmtDateFR(new Date());
+function buildHtml({ rows /* html des <tr> déjà stylés */, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
+  // Horodatage heure de Paris (pas UTC)
+  const updated = new Date().toLocaleString("fr-FR", {
+    timeZone: "Europe/Paris",
+    hour12: false,
+  });
 
-  const style = `
-  <style>
-    :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; --accent:#b9c2ff; --accent-bg:#f4f6ff; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 24px; }
-
-    /* Conteneur centré et largeur maîtrisée */
-    .wrap { max-width: 900px; margin: 0 auto; }
-
-    /* === LOGO === */
-    .logo { text-align: center; margin-bottom: 16px; }
-    .logo img {
-      display: block;
-      width: 100%;        /* pile la largeur du conteneur (donc du tableau) */
-      height: auto;
-      max-height: 160px;  /* ajuste si besoin (140/180/etc.) */
-      object-fit: contain;
-      margin: 0 auto;
-    }
-
-    /* Tableau */
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    th:nth-child(2), td:nth-child(2) { text-align: left; }
-
-    /* Réduction écart entre Équipe et 🇫🇷 */
-    th:nth-child(2), td:nth-child(2) { padding-right: 6px; }
-    th:nth-child(3), td:nth-child(3) { padding-left: 6px; }
-
-    .rank { width: 42px; color: var(--muted); }
-    .team { width: auto; }
-    .num { width: 70px; }
-    tr:hover td { background: #fafafa; }
-
-    .tag-green { background: #e6ffed; }
-    .tag-red { background: #ffecec; }
-
-    /* TOTAL en valeur */
-    .total-col { border: 2px solid var(--accent); background: var(--accent-bg); border-radius: 8px; }
-    .total { font-weight: 800; }
-
-    .updated { color: var(--muted); font-size: 13px; margin-top: 12px; text-align: right; }
-  </style>`.trim();
-
-  const thead = `
-  <thead>
-    <tr>
-      <th class="rank">#</th>
-      <th class="team">Équipe</th>
-      ${ORDER.map((c) => `<th class="num" title="${c}">${HEADERS[c]}</th>`).join("")}
-      <th class="num" title="Différence de buts cumulée">Diff +/-</th>
-      <th class="num total total-col" title="Points cumulés">TOTAL</th>
-    </tr>
-  </thead>`.trim();
-
-  const tbody = `
-  <tbody>
-    ${rows.map((t, i) => {
-      const cellsLeagues = ORDER.map((c) => {
-        const v = t[c].pts || 0;
-        const cls = v === maxPts[c] ? "tag-green" : v === minPts[c] ? "tag-red" : "";
-        return `<td class="num ${cls}">${v}</td>`;
-      }).join("");
-
-      const clsTotal = t.totalPts === maxTotal ? "tag-green" : t.totalPts === minTotal ? "tag-red" : "";
-      const clsDiff  = t.totalDiff === maxDiffAll ? "tag-green" : t.totalDiff === minDiffAll ? "tag-red" : "";
-
-      return `
-        <tr>
-          <td class="rank">${i + 1}</td>
-          <td class="team">${t.name}</td>
-          ${cellsLeagues}
-          <td class="num ${clsDiff}">${fmtSigned(t.totalDiff)}</td>
-          <td class="num total total-col ${clsTotal}">${t.totalPts}</td>
-        </tr>`;
-    }).join("\n")}
-  </tbody>`.trim();
-
-  const html = `
-<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${PAGE_TITLE}</title>
-  ${style}
+  <title>CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <style>
+    :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; --accent:#b9c2ff; --accent-bg:#f4f6ff; }
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); margin:24px; }
+
+    .wrap { max-width: 1100px; margin: 0 auto; }
+
+    /* Header / logo */
+    .logo { text-align:center; margin-bottom:16px; }
+    .logo img { display:block; width:100%; height:auto; max-height:160px; object-fit:contain; margin:0 auto; }
+
+    /* Conteneur pour que la table s'adapte à son contenu, centrée */
+    .table-wrap { display:flex; justify-content:center; overflow-x:auto; }
+
+    /* ====== Tableau compact sans “trou” ====== */
+    table { border-collapse:collapse; table-layout:fixed; width:max-content; }
+    th, td {
+      padding:8px 10px;
+      border-bottom:1px solid var(--line);
+      text-align:center;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap; /* jamais de retour à la ligne dans les cellules */
+    }
+    th:nth-child(2), td:nth-child(2) { text-align:left; }
+
+    /* Écart minimal entre Équipe et FR */
+    th:nth-child(2), td:nth-child(2) { padding-right:2px; }
+    th:nth-child(3), td:nth-child(3) { padding-left:2px; }
+
+    .rank { width:42px; color:var(--muted); }
+    .team { width:1%; white-space:nowrap; }  /* largeur = juste le texte */
+    .num  { width:48px; }                     /* colonnes points compactes */
+
+    tr:hover td { background:#fafafa; }
+
+    /* Couleurs min/max (tes classes existantes) */
+    .tag-green { background:#e6ffed; }
+    .tag-red   { background:#ffecec; }
+
+    /* TOTAL mis en avant */
+    .total-col { border:2px solid var(--accent); background:var(--accent-bg); border-radius:8px; }
+    .total { font-weight:800; }
+
+    .updated { color:var(--muted); font-size:13px; margin-top:12px; text-align:right; }
+  </style>
 </head>
 <body>
   <div class="wrap">
     <div class="logo">
-      <img src="Spurs_Logo_ESL_25-26.png" alt="European MPG Super League" />
+      <!-- Utilise un nom fixe pour changer le header sans toucher au code -->
+      <img src="logo.png" alt="European MPG Super League" />
     </div>
-    <table>
-      ${thead}
-      ${tbody}
-    </table>
-    <div class="updated">Dernière Mise à jour : ${fmtDateFR(new Date())}</div>
+
+    <div class="table-wrap">
+      <table>
+        <colgroup>
+          <col style="width:42px">      <!-- # -->
+          <col style="width:1%;">       <!-- Équipe (taille = contenu) -->
+          <col style="width:48px">      <!-- FR -->
+          <col style="width:48px">      <!-- GB -->
+          <col style="width:48px">      <!-- ES -->
+          <col style="width:48px">      <!-- IT -->
+          <col style="width:64px">      <!-- Diff -->
+          <col style="width:72px">      <!-- TOTAL -->
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="rank">#</th>
+            <th class="team">Équipe</th>
+            <th class="num" title="FR">🇫🇷</th>
+            <th class="num" title="EN">🇬🇧</th>
+            <th class="num" title="ES">🇪🇸</th>
+            <th class="num" title="IT">🇮🇹</th>
+            <th class="num" title="Différence de buts cumulée">Diff +/-</th>
+            <th class="num total total-col" title="Points cumulés">TOTAL</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.join("\n")}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="updated">Dernière Mise à jour : ${updated}</div>
   </div>
 </body>
-</html>`.trim();
-
+</html>`;
   return html;
 }
 
