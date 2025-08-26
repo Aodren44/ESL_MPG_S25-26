@@ -17,10 +17,10 @@
     .logo { text-align:center; margin-bottom:16px; }
     .logo img { display:block; width:100%; height:auto; max-height:160px; object-fit:contain; margin:0 auto; }
 
-    /* Conteneur table */
+    /* Conteneur pour que la table s'adapte à son contenu, centrée */
     .table-wrap { display:flex; justify-content:center; overflow-x:auto; }
 
-    /* ====== Tableau compact ====== */
+    /* ====== Tableau compact sans “trou” ====== */
     table { border-collapse:collapse; table-layout:fixed; width:max-content; }
     th, td {
       padding:8px 10px;
@@ -28,22 +28,25 @@
       text-align:center;
       overflow:hidden;
       text-overflow:ellipsis;
-      white-space:nowrap;
+      white-space:nowrap; /* jamais de retour à la ligne dans les cellules */
     }
     th:nth-child(2), td:nth-child(2) { text-align:left; }
 
+    /* Écart minimal entre Équipe et FR */
     th:nth-child(2), td:nth-child(2) { padding-right:2px; }
     th:nth-child(3), td:nth-child(3) { padding-left:2px; }
 
     .rank { width:42px; color:var(--muted); }
-    .team { width:1%; white-space:nowrap; }
-    .num  { width:48px; }
+    .team { width:1%; white-space:nowrap; }  /* largeur = juste le texte */
+    .num  { width:48px; }                     /* colonnes points compactes */
 
     tr:hover td { background:#fafafa; }
 
+    /* Couleurs min/max (tes classes existantes) */
     .tag-green { background:#e6ffed; }
     .tag-red   { background:#ffecec; }
 
+    /* TOTAL mis en avant */
     .total-col { border:2px solid var(--accent); background:var(--accent-bg); border-radius:8px; }
     .total { font-weight:800; }
 
@@ -53,6 +56,7 @@
 <body>
   <div class="wrap">
     <div class="logo">
+      <!-- Utilise un nom fixe pour changer le header sans toucher au code -->
       <img src="logo.png" alt="European MPG Super League" />
     </div>
 
@@ -60,7 +64,7 @@
       <table>
         <colgroup>
           <col style="width:42px">      <!-- # -->
-          <col style="width:1%;">       <!-- Équipe -->
+          <col style="width:1%;">       <!-- Équipe (taille = contenu) -->
           <col style="width:48px">      <!-- FR -->
           <col style="width:48px">      <!-- GB -->
           <col style="width:48px">      <!-- ES -->
@@ -81,12 +85,21 @@
           </tr>
         </thead>
         <tbody>
-          <!-- ici ton script generate insérera les <tr> dynamiques -->
+          [object Object]
+[object Object]
+[object Object]
+[object Object]
+[object Object]
+[object Object]
+[object Object]
+[object Object]
+[object Object]
+[object Object]
         </tbody>
       </table>
     </div>
 
-    <div class="updated">Dernière Mise à jour : (sera remplacée par generate)</div>
+    <div class="updated">Dernière Mise à jour : 26/08/2025 16:11:30</div>
   </div>
 </body>
 </html>
