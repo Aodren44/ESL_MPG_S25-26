@@ -7,7 +7,6 @@ import path from "node:path";
 const ORDER = ["FR", "EN", "ES", "IT"];
 const HEADERS = { FR: "🇫🇷", EN: "🇬🇧", ES: "🇪🇸", IT: "🇮🇹" };
 
-// URLs depuis secrets
 const LEAGUES = {
   FR: process.env.MPG_ESL_FR || "",
   EN: process.env.MPG_ESL_UK || "",
@@ -15,17 +14,13 @@ const LEAGUES = {
   IT: process.env.MPG_ESL_IT || "",
 };
 
-// Identifiants (secrets)
 const MPG_EMAIL = process.env.MPG_EMAIL || "";
 const MPG_PASSWORD = process.env.MPG_PASSWORD || "";
 
-// Sortie
 const OUTPUT_DIR = existsSync("docs") ? "docs" : ".";
 const OUTPUT_FILE = path.join(OUTPUT_DIR, "index.html");
-// ✅ 1) Titre MAJUSCULES
 const PAGE_TITLE = "CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26";
 
-// Logs secrets (sans afficher les URLs)
 for (const k of ORDER) console.log(`URL ${k}:`, LEAGUES[k] ? "(ok via secret)" : "(vide)");
 
 /* ======================== HELPERS ======================== */
@@ -37,7 +32,6 @@ function parseIntSafe(raw, fallback = 0) {
   const m = String(raw).replace(/\u00A0/g, " ").match(/-?\d+/);
   return m ? parseInt(m[0], 10) : fallback;
 }
-// ✅ 5) Format avec " à " entre date et heure
 function fmtDateFR(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   const date = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
@@ -47,37 +41,11 @@ function fmtDateFR(d = new Date()) {
 function canonicalName(name) {
   return String(name || "").trim();
 }
-// ✅ 3) Affichage signé pour Diff
 function fmtSigned(n) {
   if (n > 0) return `+${n}`;
   return String(n);
 }
 
-async function safeClick(page, selectors = []) {
-  for (const sel of selectors) {
-    try {
-      const el = page.locator(sel).first();
-      if (await el.isVisible({ timeout: 800 }).catch(() => false)) {
-        await el.click({ timeout: 1500 });
-        return true;
-      }
-    } catch {}
-  }
-  return false;
-}
-async function dumpForDebug(page, code) {
-  try {
-    const png = `screenshot-${code}.png`;
-    const html = `dump-${code}.html`;
-    await page.screenshot({ path: png, fullPage: true }).catch(() => {});
-    const content = await page.content().catch(() => "");
-    if (content) writeFileSync(html, content);
-    console.log(`🧩 Dump ${code}: ${png}${content ? `, ${html}` : ""}`);
-  } catch {}
-}
-
-/* ======================== LOGIN ROBUSTE (version qui marchait) ======================== */
-// Accepte les cookies (page + iframes OneTrust)
 async function acceptCookiesRobust(page) {
   const selectors = [
     "#onetrust-accept-btn-handler",
@@ -116,8 +84,6 @@ async function acceptCookiesRobust(page) {
     await page.waitForTimeout(300);
   }
 }
-
-// Cherche un champ dans la page OU ses frames
 async function findFieldAcrossFrames(page, selector) {
   const frames = [page, ...page.frames()];
   for (const f of frames) {
@@ -129,8 +95,6 @@ async function findFieldAcrossFrames(page, selector) {
   }
   return null;
 }
-
-// Clique un CTA “Se connecter”
 async function clickLoginCTA(page) {
   const selectors = [
     "a[href*='/login']",
@@ -154,18 +118,14 @@ async function clickLoginCTA(page) {
   }
   return false;
 }
-
-// Login principal (robuste)
 async function loginRobust(page) {
   if (!MPG_EMAIL || !MPG_PASSWORD) throw new Error("MPG_EMAIL / MPG_PASSWORD manquants.");
 
-  // 1) Home
   console.log("→ GOTO home");
   await page.goto("https://mpg.football/", { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
   await page.waitForTimeout(800);
   await acceptCookiesRobust(page);
 
-  // 2) URLs directes de login
   const loginUrls = ["https://mpg.football/login", "https://mpg.football/connexion", "https://mpg.football/auth/login"];
   for (const u of loginUrls) {
     console.log("→ tentative URL login:", u);
@@ -182,7 +142,6 @@ async function loginRobust(page) {
     }
   }
 
-  // 3) Sinon CTA
   let emailField = await findFieldAcrossFrames(
     page,
     "input[type='email'], input[name='email'], #email, input[autocomplete='email']"
@@ -207,7 +166,6 @@ async function loginRobust(page) {
   await emailField.locator.fill(MPG_EMAIL, { timeout: 30000 });
   await pwdField.locator.fill(MPG_PASSWORD, { timeout: 30000 });
 
-  // 4) Submit dans la MÊME frame
   const submitSelectors = [
     "button[type='submit']",
     "button:has-text('Se connecter')",
@@ -239,8 +197,6 @@ async function loginRobust(page) {
   await page.waitForURL(/mpg\.football\/(dashboard|league)/, { timeout: 60000 }).catch(() => {});
   console.log("✅ Login tenté, url actuelle:", page.url());
 }
-
-// Wrapper “login si nécessaire” (utilisé par le nouveau flux)
 async function loginIfNeeded(context) {
   const page = await context.newPage();
   try {
@@ -275,7 +231,6 @@ async function scrapeLeague(context, code, url) {
 
     await ensureOnLeague();
 
-    // Si renvoyé vers login/homepage → un seul essai de login puis retry
     const firstHtml = await page.content().catch(() => "");
     if ((/\/login/i.test(page.url()) || /Du foot, des amis/.test(firstHtml)) && !triedLogin) {
       console.log(`🔁 ${code}: redirigé vers login/homepage → login + 2e tentative`);
@@ -283,11 +238,9 @@ async function scrapeLeague(context, code, url) {
       await ensureOnLeague();
     }
 
-    // Attend le tableau mais ne bloque pas indéfiniment
     await page.waitForSelector("table", { timeout: 20000 }).catch(() => {});
     await sleep(1000);
 
-    // Récupère lignes (tableau principal)
     let rows =
       (await page
         .$$eval("table tbody tr", (trs) =>
@@ -295,7 +248,6 @@ async function scrapeLeague(context, code, url) {
         )
         .catch(() => [])) || [];
 
-    // Fallback : n'importe quelle table structurée
     if (!rows.length) {
       rows =
         (await page
@@ -312,7 +264,6 @@ async function scrapeLeague(context, code, url) {
       throw new Error(`Aucune ligne de classement trouvée pour ${code}`);
     }
 
-    // En-têtes pour trouver indices : équipe / +/- / points
     const headers =
       (await page.$$eval("table thead th", (ths) => ths.map((th) => th.textContent.trim())).catch(() => [])) || [];
     const findIdx = (re, fallback) => {
@@ -323,7 +274,6 @@ async function scrapeLeague(context, code, url) {
     const idxPts = findIdx(/points|pts/i, Math.max(0, (headers.length || 1) - 1));
     const idxDiff = findIdx(/\+\/-|±|diff/i, Math.max(0, idxPts - 1));
 
-    // Map résultat
     const data = new Map();
     for (const row of rows) {
       if (!row || !row.length) continue;
@@ -375,13 +325,11 @@ function aggregate(leaguesData) {
     }
   }
 
-  // Totaux
   for (const t of teams.values()) {
     t.totalPts = ORDER.reduce((s, c) => s + (t[c].pts || 0), 0);
     t.totalDiff = ORDER.reduce((s, c) => s + (t[c].diff || 0), 0);
   }
 
-  // Min/Max colonnes
   const minPts = {},
     maxPts = {};
   for (const code of ORDER) {
@@ -396,13 +344,11 @@ function aggregate(leaguesData) {
   const minDiffAll = diffs.length ? Math.min(...diffs) : 0;
   const maxDiffAll = diffs.length ? Math.max(...diffs) : 0;
 
-  // Compter verts/rouges sur FR/EN/ES/IT
   for (const t of teams.values()) {
     t.greens = ORDER.reduce((s, c) => s + (t[c].pts === maxPts[c] ? 1 : 0), 0);
     t.reds = ORDER.reduce((s, c) => s + (t[c].pts === minPts[c] ? 1 : 0), 0);
   }
 
-  // Tri : TOTAL ↓ → greens ↓ → reds ↑ → Diff ↓
   const rows = Array.from(teams.values()).sort((a, b) => {
     if (b.totalPts !== a.totalPts) return b.totalPts - a.totalPts;
     if (b.greens !== a.greens) return b.greens - a.greens;
@@ -420,23 +366,34 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
 
   const style = `
   <style>
-    :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; }
+    :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; --accent:#b9c2ff; --accent-bg:#f4f6ff; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 24px; }
-    /* ✅ 2) Conteneur centré et plus contenu */
     .wrap { max-width: 900px; margin: 0 auto; }
-    /* ✅ 1) Titre centré + majuscules */
     h1 { font-size: 22px; margin: 0 0 12px; text-align: center; text-transform: uppercase; letter-spacing: 0.5px; }
     .updated { color: var(--muted); font-size: 13px; margin-top: 12px; text-align: right; }
+
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Centrer tout par défaut… */
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* …sauf la colonne Équipe alignée à gauche */
     th:nth-child(2), td:nth-child(2) { text-align: left; }
-    th { font-weight: 600; }
+
+    /* Réduction maximale de l’espace entre Équipe (col 2) et 🇫🇷 (col 3) */
+    th:nth-child(2), td:nth-child(2) { padding-right: 6px; }  /* moins d'espace à droite du nom */
+    th:nth-child(3), td:nth-child(3) { padding-left: 6px; }   /* moins d'espace à gauche de 🇫🇷 */
+
+    /* Largeur maîtrisée : la colonne équipe s'ajuste, les colonnes numériques restent compactes */
+    .rank { width: 42px; color: var(--muted); }
+    .team { width: auto; }
+    .num { width: 70px; } /* FR/EN/ES/IT/Diff/TOTAL */
     tr:hover td { background: #fafafa; }
+
     .tag-green { background: #e6ffed; }
     .tag-red { background: #ffecec; }
-    .rank { width: 42px; color: var(--muted); }
-    .team { width: 260px; }
-    .total { font-weight: 700; }
+
+    /* TOTAL mis en valeur : cadre + fond léger + coins doux */
+    .total-col { border: 2px solid var(--accent); background: var(--accent-bg); border-radius: 8px; }
+    .total { font-weight: 800; }
   </style>`.trim();
 
   const thead = `
@@ -444,9 +401,9 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
     <tr>
       <th class="rank">#</th>
       <th class="team">Équipe</th>
-      ${ORDER.map((c) => `<th title="${c}">${HEADERS[c]}</th>`).join("")}
-      <th title="Différence de buts cumulée">Diff +/-</th>
-      <th class="total" title="Points cumulés">TOTAL</th>
+      ${ORDER.map((c) => `<th class="num" title="${c}">${HEADERS[c]}</th>`).join("")}
+      <th class="num" title="Différence de buts cumulée">Diff +/-</th>
+      <th class="num total total-col" title="Points cumulés">TOTAL</th>
     </tr>
   </thead>`.trim();
 
@@ -457,7 +414,7 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
         const cellsLeagues = ORDER.map((c) => {
           const v = t[c].pts || 0;
           const cls = v === maxPts[c] ? "tag-green" : v === minPts[c] ? "tag-red" : "";
-          return `<td class="${cls}">${v}</td>`;
+          return `<td class="num ${cls}">${v}</td>`;
         }).join("");
 
         const clsTotal = t.totalPts === maxTotal ? "tag-green" : t.totalPts === minTotal ? "tag-red" : "";
@@ -466,10 +423,10 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
         return `
           <tr>
             <td class="rank">${i + 1}</td>
-            <td>${t.name}</td>
+            <td class="team">${t.name}</td>
             ${cellsLeagues}
-            <td class="${clsDiff}">${fmtSigned(t.totalDiff)}</td>
-            <td class="total ${clsTotal}">${t.totalPts}</td>
+            <td class="num ${clsDiff}">${fmtSigned(t.totalDiff)}</td>
+            <td class="num total total-col ${clsTotal}">${t.totalPts}</td>
           </tr>`;
       })
       .join("\n")}
@@ -491,8 +448,6 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
       ${thead}
       ${tbody}
     </table>
-    <!-- ✅ 4) Légende supprimée -->
-    <!-- ✅ 5) Libellé déplacé SOUS le tableau + wording exact -->
     <div class="updated">Dernière Mise à jour : ${updated}</div>
   </div>
 </body>
@@ -515,7 +470,6 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
       timezoneId: "Europe/Paris",
     });
 
-    // tentative de login avant scraping (une fois)
     await loginIfNeeded(context);
 
     const leaguesData = {};
