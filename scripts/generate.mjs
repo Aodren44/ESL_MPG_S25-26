@@ -240,4 +240,302 @@ async function loginRobust(page) {
   console.log("✅ Login tenté, url actuelle:", page.url());
 }
 
-// Wrapper “login si nécessaire” (utilisé par le nouv
+// Wrapper “login si nécessaire” (utilisé par le nouveau flux)
+async function loginIfNeeded(context) {
+  const page = await context.newPage();
+  try {
+    await loginRobust(page);
+    const ok = /mpg\.football\/(dashboard|league)/.test(page.url());
+    console.log(ok ? "✅ Login OK" : "⚠️ Login non confirmé (on continue)");
+    return ok;
+  } catch (e) {
+    console.log("⚠️ Login: exception, on continue en invité:", e?.message || e);
+    return false;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+/* ======================== SCRAPING ======================== */
+async function scrapeLeague(context, code, url) {
+  const page = await context.newPage();
+  page.setDefaultTimeout(15000);
+
+  let triedLogin = false;
+
+  async function ensureOnLeague() {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await acceptCookiesRobust(page);
+  }
+
+  try {
+    console.log(`▶️  ${code} → ${url || "(vide)"}`);
+    if (!url) throw new Error(`URL manquante pour ${code}`);
+
+    await ensureOnLeague();
+
+    // Si renvoyé vers login/homepage → un seul essai de login puis retry
+    const firstHtml = await page.content().catch(() => "");
+    if ((/\/login/i.test(page.url()) || /Du foot, des amis/.test(firstHtml)) && !triedLogin) {
+      console.log(`🔁 ${code}: redirigé vers login/homepage → login + 2e tentative`);
+      triedLogin = await loginIfNeeded(context);
+      await ensureOnLeague();
+    }
+
+    // Attend le tableau mais ne bloque pas indéfiniment
+    await page.waitForSelector("table", { timeout: 20000 }).catch(() => {});
+    await sleep(1000);
+
+    // Récupère lignes (tableau principal)
+    let rows =
+      (await page
+        .$$eval("table tbody tr", (trs) =>
+          trs.map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
+        )
+        .catch(() => [])) || [];
+
+    // Fallback : n'importe quelle table structurée
+    if (!rows.length) {
+      rows =
+        (await page
+          .$eval("table", (tbl) =>
+            Array.from(tbl.querySelectorAll("tr"))
+              .filter((tr) => tr.querySelectorAll("td").length)
+              .map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
+          )
+          .catch(() => [])) || [];
+    }
+
+    if (!rows.length) {
+      await dumpForDebug(page, code);
+      throw new Error(`Aucune ligne de classement trouvée pour ${code}`);
+    }
+
+    // En-têtes pour trouver indices : équipe / +/- / points
+    const headers =
+      (await page.$$eval("table thead th", (ths) => ths.map((th) => th.textContent.trim())).catch(() => [])) || [];
+    const findIdx = (re, fallback) => {
+      const i = headers.findIndex((h) => re.test(h || ""));
+      return i !== -1 ? i : fallback;
+    };
+    const idxTeam = findIdx(/équipe|equipe|team/i, 1);
+    const idxPts = findIdx(/points|pts/i, Math.max(0, (headers.length || 1) - 1));
+    const idxDiff = findIdx(/\+\/-|±|diff/i, Math.max(0, idxPts - 1));
+
+    // Map résultat
+    const data = new Map();
+    for (const row of rows) {
+      if (!row || !row.length) continue;
+      const name = canonicalName(row[idxTeam] ?? row[1] ?? row[0]);
+      const pts = parseIntSafe(row[idxPts], 0);
+      const diff = parseIntSafe(row[idxDiff], 0);
+      if (!name) continue;
+      data.set(name, { pts, diff });
+    }
+
+    if (!data.size) {
+      await dumpForDebug(page, code);
+      throw new Error(`Tableau lu mais vide pour ${code}`);
+    }
+
+    console.log(`✅ ${code}: ${data.size} équipes`);
+    return data;
+  } catch (e) {
+    console.warn(`⚠️ ${code}: échec (${e?.message || e}). On continue avec 0. Voir dumps.`);
+    return new Map();
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+/* ======================== AGREGE + CLASSE ======================== */
+function aggregate(leaguesData) {
+  const teams = new Map();
+
+  for (const code of ORDER) {
+    const map = leaguesData[code] || new Map();
+    for (const [name, { pts, diff }] of map.entries()) {
+      if (!teams.has(name)) {
+        teams.set(name, {
+          name,
+          FR: { pts: 0, diff: 0 },
+          EN: { pts: 0, diff: 0 },
+          ES: { pts: 0, diff: 0 },
+          IT: { pts: 0, diff: 0 },
+          totalPts: 0,
+          totalDiff: 0,
+          greens: 0,
+          reds: 0,
+        });
+      }
+      const t = teams.get(name);
+      t[code].pts = pts;
+      t[code].diff = diff;
+    }
+  }
+
+  // Totaux
+  for (const t of teams.values()) {
+    t.totalPts = ORDER.reduce((s, c) => s + (t[c].pts || 0), 0);
+    t.totalDiff = ORDER.reduce((s, c) => s + (t[c].diff || 0), 0);
+  }
+
+  // Min/Max colonnes
+  const minPts = {},
+    maxPts = {};
+  for (const code of ORDER) {
+    const vals = Array.from(teams.values()).map((t) => t[code].pts || 0);
+    minPts[code] = vals.length ? Math.min(...vals) : 0;
+    maxPts[code] = vals.length ? Math.max(...vals) : 0;
+  }
+  const totals = Array.from(teams.values()).map((t) => t.totalPts);
+  const diffs = Array.from(teams.values()).map((t) => t.totalDiff);
+  const minTotal = totals.length ? Math.min(...totals) : 0;
+  const maxTotal = totals.length ? Math.max(...totals) : 0;
+  const minDiffAll = diffs.length ? Math.min(...diffs) : 0;
+  const maxDiffAll = diffs.length ? Math.max(...diffs) : 0;
+
+  // Compter verts/rouges sur FR/EN/ES/IT
+  for (const t of teams.values()) {
+    t.greens = ORDER.reduce((s, c) => s + (t[c].pts === maxPts[c] ? 1 : 0), 0);
+    t.reds = ORDER.reduce((s, c) => s + (t[c].pts === minPts[c] ? 1 : 0), 0);
+  }
+
+  // Tri : TOTAL ↓ → greens ↓ → reds ↑ → Diff ↓
+  const rows = Array.from(teams.values()).sort((a, b) => {
+    if (b.totalPts !== a.totalPts) return b.totalPts - a.totalPts;
+    if (b.greens !== a.greens) return b.greens - a.greens;
+    if (a.reds !== b.reds) return a.reds - b.reds;
+    if (b.totalDiff !== a.totalDiff) return b.totalDiff - a.totalDiff;
+    return 0;
+  });
+
+  return { rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll };
+}
+
+/* ======================== RENDU HTML ======================== */
+function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
+  const updated = fmtDateFR(new Date());
+
+  const style = `
+  <style>
+    :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 24px; }
+    /* ✅ 2) Conteneur centré et plus contenu */
+    .wrap { max-width: 900px; margin: 0 auto; }
+    /* ✅ 1) Titre centré + majuscules */
+    h1 { font-size: 22px; margin: 0 0 12px; text-align: center; text-transform: uppercase; letter-spacing: 0.5px; }
+    .updated { color: var(--muted); font-size: 13px; margin-top: 12px; text-align: right; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    th:nth-child(2), td:nth-child(2) { text-align: left; }
+    th { font-weight: 600; }
+    tr:hover td { background: #fafafa; }
+    .tag-green { background: #e6ffed; }
+    .tag-red { background: #ffecec; }
+    .rank { width: 42px; color: var(--muted); }
+    .team { width: 260px; }
+    .total { font-weight: 700; }
+  </style>`.trim();
+
+  const thead = `
+  <thead>
+    <tr>
+      <th class="rank">#</th>
+      <th class="team">Équipe</th>
+      ${ORDER.map((c) => `<th title="${c}">${HEADERS[c]}</th>`).join("")}
+      <th title="Différence de buts cumulée">Diff +/-</th>
+      <th class="total" title="Points cumulés">TOTAL</th>
+    </tr>
+  </thead>`.trim();
+
+  const tbody = `
+  <tbody>
+    ${rows
+      .map((t, i) => {
+        const cellsLeagues = ORDER.map((c) => {
+          const v = t[c].pts || 0;
+          const cls = v === maxPts[c] ? "tag-green" : v === minPts[c] ? "tag-red" : "";
+          return `<td class="${cls}">${v}</td>`;
+        }).join("");
+
+        const clsTotal = t.totalPts === maxTotal ? "tag-green" : t.totalPts === minTotal ? "tag-red" : "";
+        const clsDiff = t.totalDiff === maxDiffAll ? "tag-green" : t.totalDiff === minDiffAll ? "tag-red" : "";
+
+        return `
+          <tr>
+            <td class="rank">${i + 1}</td>
+            <td>${t.name}</td>
+            ${cellsLeagues}
+            <td class="${clsDiff}">${fmtSigned(t.totalDiff)}</td>
+            <td class="total ${clsTotal}">${t.totalPts}</td>
+          </tr>`;
+      })
+      .join("\n")}
+  </tbody>`.trim();
+
+  const html = `
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${PAGE_TITLE}</title>
+  ${style}
+</head>
+<body>
+  <div class="wrap">
+    <h1>${PAGE_TITLE}</h1>
+    <table>
+      ${thead}
+      ${tbody}
+    </table>
+    <!-- ✅ 4) Légende supprimée -->
+    <!-- ✅ 5) Libellé déplacé SOUS le tableau + wording exact -->
+    <div class="updated">Dernière Mise à jour : ${updated}</div>
+  </div>
+</body>
+</html>`.trim();
+
+  return html;
+}
+
+/* ======================== MAIN ======================== */
+(async () => {
+  console.log("🚀 generate.mjs démarré", nowFR());
+  for (const k of ORDER) if (!LEAGUES[k]) console.warn(`⚠️ URL manquante pour ${k}`);
+
+  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  try {
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      locale: "fr-FR",
+      timezoneId: "Europe/Paris",
+    });
+
+    // tentative de login avant scraping (une fois)
+    await loginIfNeeded(context);
+
+    const leaguesData = {};
+    for (const code of ORDER) {
+      const started = Date.now();
+      leaguesData[code] = await scrapeLeague(context, code, LEAGUES[code]).catch(() => new Map());
+      console.log(`⏱️ ${code} traité en ${(Date.now() - started) / 1000}s`);
+    }
+
+    const aggregated = aggregate(leaguesData);
+    const html = buildHtml(aggregated);
+
+    if (OUTPUT_DIR !== "." && !existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
+    writeFileSync(OUTPUT_FILE, html, "utf8");
+    console.log(`💾 Page générée → ${OUTPUT_FILE}`);
+  } catch (e) {
+    console.error("❌ Erreur durant la génération :", e?.stack || e);
+    process.exitCode = 1;
+  } finally {
+    await browser.close().catch(() => {});
+    console.log("🏁 Terminé", nowFR());
+  }
+})();
