@@ -15,35 +15,47 @@
     .logo { text-align: center; margin-bottom: 16px; }
     .logo img {
       display: block;
-      width: 100%;        /* pile la largeur du conteneur (donc du tableau) */
+      width: 100%;
       height: auto;
-      max-height: 160px;  /* ajuste si besoin (140/180/etc.) */
+      max-height: 160px;
       object-fit: contain;
       margin: 0 auto;
     }
 
-    /* Tableau */
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* ====== Tableau ====== */
+    table { width: 100%; border-collapse: collapse; table-layout: auto; } /* auto pour laisser respirer la colonne équipe */
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;             /* empêche les retours à la ligne */
+    }
     th:nth-child(2), td:nth-child(2) { text-align: left; }
 
-    /* Réduction écart entre Équipe et 🇫🇷 */
+    /* réduire l’écart entre Équipe et la 1re colonne de points */
     th:nth-child(2), td:nth-child(2) { padding-right: 6px; }
     th:nth-child(3), td:nth-child(3) { padding-left: 6px; }
 
     .rank { width: 42px; color: var(--muted); }
-    .team { width: auto; }
-    .num { width: 70px; }
+    .team { width: 1%; white-space: nowrap; }  /* colle la largeur au plus long nom */
+    .num { width: 56px; }                       /* colonnes points compactes mais lisibles */
+
     tr:hover td { background: #fafafa; }
 
     .tag-green { background: #e6ffed; }
-    .tag-red { background: #ffecec; }
+    .tag-red   { background: #ffecec; }
 
     /* TOTAL en valeur */
     .total-col { border: 2px solid var(--accent); background: var(--accent-bg); border-radius: 8px; }
     .total { font-weight: 800; }
 
     .updated { color: var(--muted); font-size: 13px; margin-top: 12px; text-align: right; }
+
+    /* Icônes drapeaux */
+    .flag { display:inline-block; width:18px; height:18px; vertical-align:-3px; }
+    .flag img { display:block; width:100%; height:100%; }
   </style>
 </head>
 <body>
@@ -51,22 +63,34 @@
     <div class="logo">
       <img src="Spurs_Logo_ESL_25-26.png" alt="European MPG Super League" />
     </div>
+
     <table>
       <thead>
-    <tr>
-      <th class="rank">#</th>
-      <th class="team">Équipe</th>
-      <th class="num" title="FR">🇫🇷</th><th class="num" title="EN">🇬🇧</th><th class="num" title="ES">🇪🇸</th><th class="num" title="IT">🇮🇹</th>
-      <th class="num" title="Différence de buts cumulée">Diff +/-</th>
-      <th class="num total total-col" title="Points cumulés">TOTAL</th>
-    </tr>
-  </thead>
+        <tr>
+          <th class="rank">#</th>
+          <th class="team">Équipe</th>
+          <th class="num" title="France">
+            <span class="flag"><img alt="France" src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/72x72/1f1eb-1f1f7.png"></span>
+          </th>
+          <th class="num" title="United Kingdom">
+            <span class="flag"><img alt="United Kingdom" src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/72x72/1f1ec-1f1e7.png"></span>
+          </th>
+          <th class="num" title="Spain">
+            <span class="flag"><img alt="Spain" src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/72x72/1f1ea-1f1f8.png"></span>
+          </th>
+          <th class="num" title="Italy">
+            <span class="flag"><img alt="Italy" src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/72x72/1f1ee-1f1f9.png"></span>
+          </th>
+          <th class="num" title="Différence de buts cumulée">Diff +/-</th>
+          <th class="num total total-col" title="Points cumulés">TOTAL</th>
+        </tr>
+      </thead>
+
       <tbody>
-    
         <tr>
           <td class="rank">1</td>
           <td class="team">Moncabounboa</td>
-          <td class="num tag-green">6</td><td class="num ">3</td><td class="num tag-green">4</td><td class="num tag-green">3</td>
+          <td class="num tag-green">6</td><td class="num">3</td><td class="num tag-green">4</td><td class="num tag-green">3</td>
           <td class="num tag-green">+6</td>
           <td class="num total total-col tag-green">16</td>
         </tr>
@@ -74,77 +98,60 @@
         <tr>
           <td class="rank">2</td>
           <td class="team">FC Méplanku</td>
-          <td class="num tag-green">6</td><td class="num tag-green">6</td><td class="num ">1</td><td class="num ">1</td>
-          <td class="num ">+3</td>
-          <td class="num total total-col ">14</td>
+          <td class="num tag-green">6</td><td class="num tag-green">6</td><td class="num">1</td><td class="num">1</td>
+          <td class="num">+3</td>
+          <td class="num total total-col">14</td>
         </tr>
 
         <tr>
           <td class="rank">3</td>
           <td class="team">Monster 83</td>
-          <td class="num ">4</td><td class="num tag-red">0</td><td class="num tag-green">4</td><td class="num tag-green">3</td>
-          <td class="num ">0</td>
-          <td class="num total total-col ">11</td>
+          <td class="num">4</td><td class="num tag-red">0</td><td class="num tag-green">4</td><td class="num tag-green">3</td>
+          <td class="num">0</td>
+          <td class="num total total-col">11</td>
         </tr>
 
         <tr>
           <td class="rank">4</td>
           <td class="team">Pionniers Tours 🏈</td>
-          <td class="num ">2</td><td class="num ">3</td><td class="num ">3</td><td class="num tag-green">3</td>
-          <td class="num ">+1</td>
-          <td class="num total total-col ">11</td>
+          <td class="num">2</td><td class="num">3</td><td class="num">3</td><td class="num tag-green">3</td>
+          <td class="num">+1</td>
+          <td class="num total total-col">11</td>
         </tr>
 
         <tr>
           <td class="rank">5</td>
           <td class="team">ElProfesor deRosario</td>
-          <td class="num ">2</td><td class="num tag-green">6</td><td class="num ">3</td><td class="num tag-red">0</td>
-          <td class="num ">+2</td>
-          <td class="num total total-col ">11</td>
+          <td class="num">2</td><td class="num tag-green">6</td><td class="num">3</td><td class="num tag-red">0</td>
+          <td class="num">+2</td>
+          <td class="num total total-col">11</td>
         </tr>
 
         <tr>
           <td class="rank">6</td>
           <td class="team">New Team</td>
-          <td class="num ">2</td><td class="num tag-green">6</td><td class="num ">2</td><td class="num tag-red">0</td>
-          <td class="num ">+3</td>
-          <td class="num total total-col ">10</td>
+          <td class="num">2</td><td class="num tag-green">6</td><td class="num">2</td><td class="num tag-red">0</td>
+          <td class="num">+3</td>
+          <td class="num total total-col">10</td>
         </tr>
 
         <tr>
           <td class="rank">7</td>
           <td class="team">Malantate FC</td>
-          <td class="num tag-red">0</td><td class="num ">3</td><td class="num ">3</td><td class="num tag-green">3</td>
-          <td class="num ">-3</td>
-          <td class="num total total-col ">9</td>
+          <td class="num tag-red">0</td><td class="num">3</td><td class="num">3</td><td class="num tag-green">3</td>
+          <td class="num">-3</td>
+          <td class="num total total-col">9</td>
         </tr>
 
         <tr>
           <td class="rank">8</td>
           <td class="team">Football team Graou</td>
-          <td class="num ">1</td><td class="num tag-red">0</td><td class="num tag-green">4</td><td class="num ">1</td>
-          <td class="num ">-2</td>
-          <td class="num total total-col ">6</td>
+          <td class="num">1</td><td class="num tag-red">0</td><td class="num tag-green">4</td><td class="num">1</td>
+          <td class="num">-2</td>
+          <td class="num total total-col">6</td>
         </tr>
 
         <tr>
           <td class="rank">9</td>
           <td class="team">RedBull vodka</td>
-          <td class="num ">1</td><td class="num ">3</td><td class="num tag-red">0</td><td class="num tag-red">0</td>
-          <td class="num ">-4</td>
-          <td class="num total total-col tag-red">4</td>
-        </tr>
-
-        <tr>
-          <td class="rank">10</td>
-          <td class="team">ES Pennoise</td>
-          <td class="num ">1</td><td class="num tag-red">0</td><td class="num ">3</td><td class="num tag-red">0</td>
-          <td class="num tag-red">-6</td>
-          <td class="num total total-col tag-red">4</td>
-        </tr>
-  </tbody>
-    </table>
-    <div class="updated">Dernière Mise à jour : 26/08/2025 à 12:23:55</div>
-  </div>
-</body>
-</html>
+          <td class="n
