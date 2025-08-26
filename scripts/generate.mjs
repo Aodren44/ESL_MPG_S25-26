@@ -362,38 +362,56 @@ function aggregate(leaguesData) {
 
 /* ======================== RENDU HTML ======================== */
 function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
-  const updated = fmtDateFR(new Date());
+  const updated = (function fmtDateFR(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, "0");
+    const date = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+    const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return `${date} à ${time}`;
+  })();
 
   const style = `
   <style>
     :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; --accent:#b9c2ff; --accent-bg:#f4f6ff; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 24px; }
-    .wrap { max-width: 900px; margin: 0 auto; }
-    h1 { font-size: 22px; margin: 0 0 12px; text-align: center; text-transform: uppercase; letter-spacing: 0.5px; }
-    .updated { color: var(--muted); font-size: 13px; margin-top: 12px; text-align: right; }
 
+    /* Conteneur centré et largeur maîtrisée */
+    .wrap { max-width: 900px; margin: 0 auto; }
+
+    /* === LOGO (nouveau) === */
+    .logo { text-align: center; margin-bottom: 16px; }
+    .logo img {
+      /* Le logo prendra EXACTEMENT la largeur du tableau */
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 160px;  /* ← ajuste si tu veux plus grand/petit (ex: 140/180) */
+      object-fit: contain;
+      margin: 0 auto;
+    }
+
+    /* Tableau */
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    /* Centrer tout par défaut… */
     th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    /* …sauf la colonne Équipe alignée à gauche */
     th:nth-child(2), td:nth-child(2) { text-align: left; }
 
-    /* Réduction maximale de l’espace entre Équipe (col 2) et 🇫🇷 (col 3) */
-    th:nth-child(2), td:nth-child(2) { padding-right: 6px; }  /* moins d'espace à droite du nom */
-    th:nth-child(3), td:nth-child(3) { padding-left: 6px; }   /* moins d'espace à gauche de 🇫🇷 */
+    /* Réduction de l’écart entre Équipe et 🇫🇷 */
+    th:nth-child(2), td:nth-child(2) { padding-right: 6px; }
+    th:nth-child(3), td:nth-child(3) { padding-left: 6px; }
 
-    /* Largeur maîtrisée : la colonne équipe s'ajuste, les colonnes numériques restent compactes */
     .rank { width: 42px; color: var(--muted); }
     .team { width: auto; }
-    .num { width: 70px; } /* FR/EN/ES/IT/Diff/TOTAL */
+    .num { width: 70px; }
     tr:hover td { background: #fafafa; }
 
     .tag-green { background: #e6ffed; }
     .tag-red { background: #ffecec; }
 
-    /* TOTAL mis en valeur : cadre + fond léger + coins doux */
+    /* TOTAL mis en valeur */
     .total-col { border: 2px solid var(--accent); background: var(--accent-bg); border-radius: 8px; }
     .total { font-weight: 800; }
+
+    /* Libellé de mise à jour */
+    .updated { color: var(--muted); font-size: 13px; margin-top: 12px; text-align: right; }
   </style>`.trim();
 
   const thead = `
@@ -401,7 +419,7 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
     <tr>
       <th class="rank">#</th>
       <th class="team">Équipe</th>
-      ${ORDER.map((c) => `<th class="num" title="${c}">${HEADERS[c]}</th>`).join("")}
+      ${["FR","EN","ES","IT"].map((c) => `<th class="num" title="\${c}">\${({"FR":"🇫🇷","EN":"🇬🇧","ES":"🇪🇸","IT":"🇮🇹"})[c]}</th>`).join("")}
       <th class="num" title="Différence de buts cumulée">Diff +/-</th>
       <th class="num total total-col" title="Points cumulés">TOTAL</th>
     </tr>
@@ -409,49 +427,60 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
 
   const tbody = `
   <tbody>
-    ${rows
-      .map((t, i) => {
-        const cellsLeagues = ORDER.map((c) => {
-          const v = t[c].pts || 0;
-          const cls = v === maxPts[c] ? "tag-green" : v === minPts[c] ? "tag-red" : "";
-          return `<td class="num ${cls}">${v}</td>`;
-        }).join("");
+    ${rows.map((t, i) => {
+      const cellsLeagues = ["FR","EN","ES","IT"].map((c) => {
+        const v = t[c].pts || 0;
+        const cls = v === maxPts[c] ? "tag-green" : v === (function(vals){return vals.length?Math.min(...vals):0})([]) ? "tag-red" : "";
+        return `<td class="num ${cls}">${v}</td>`;
+      }).join("");
 
-        const clsTotal = t.totalPts === maxTotal ? "tag-green" : t.totalPts === minTotal ? "tag-red" : "";
-        const clsDiff = t.totalDiff === maxDiffAll ? "tag-green" : t.totalDiff === minDiffAll ? "tag-red" : "";
+      const totals = rows.map(r => r.totalPts);
+      const diffs  = rows.map(r => r.totalDiff);
+      const minTotal = totals.length ? Math.min(...totals) : 0;
+      const maxTotal = totals.length ? Math.max(...totals) : 0;
+      const minDiffAll = diffs.length ? Math.min(...diffs) : 0;
+      const maxDiffAll = diffs.length ? Math.max(...diffs) : 0;
 
-        return `
-          <tr>
-            <td class="rank">${i + 1}</td>
-            <td class="team">${t.name}</td>
-            ${cellsLeagues}
-            <td class="num ${clsDiff}">${fmtSigned(t.totalDiff)}</td>
-            <td class="num total total-col ${clsTotal}">${t.totalPts}</td>
-          </tr>`;
-      })
-      .join("\n")}
+      const clsTotal = t.totalPts === maxTotal ? "tag-green" : t.totalPts === minTotal ? "tag-red" : "";
+      const clsDiff  = t.totalDiff === maxDiffAll ? "tag-green" : t.totalDiff === minDiffAll ? "tag-red" : "";
+      const fmtSigned = (n) => n > 0 ? \`+\${n}\` : String(n);
+
+      return `
+        <tr>
+          <td class="rank">${i + 1}</td>
+          <td class="team">${t.name}</td>
+          ${cellsLeagues}
+          <td class="num ${clsDiff}">${fmtSigned(t.totalDiff)}</td>
+          <td class="num total total-col ${clsTotal}">${t.totalPts}</td>
+        </tr>`;
+    }).join("\n")}
   </tbody>`.trim();
 
-const html = `
+  const html = `
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  ...
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26</title>
+  ${style}
 </head>
 <body>
   <div class="wrap">
+    <!-- Logo centré au-dessus du tableau -->
     <div class="logo">
-      <img src="Spurs_Logo_ESL_25-26.png" alt="European MPG Super League" />
+      <img src="logo-esl.png" alt="European MPG Super League" />
     </div>
+
     <table>
       ${thead}
       ${tbody}
     </table>
+
     <div class="updated">Dernière Mise à jour : ${updated}</div>
   </div>
 </body>
 </html>`.trim();
-
 
   return html;
 }
