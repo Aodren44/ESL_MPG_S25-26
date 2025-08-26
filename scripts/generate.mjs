@@ -361,32 +361,54 @@ function aggregate(leaguesData) {
   return { rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll };
 }
 
-/* ======================== RENDU HTML ======================== */
+/* ======================== RENDU HTML (à partir des objets) ======================== */
 function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
-  // Horodatage heure de Paris (pas UTC)
+  // Horodatage heure de Paris
   const updated = new Date().toLocaleString("fr-FR", {
     timeZone: "Europe/Paris",
     hour12: false,
   });
 
-  // rows peut être: tableau de strings "<tr>...</tr>" OU d'objets.
-  // -> On sécurise: si objet, on prend .html ou .tr; sinon on ignore.
-  const rowsHtml = Array.isArray(rows)
-    ? rows
-        .map(r => {
-          if (typeof r === "string") return r;
-          if (r && typeof r === "object") return r.html ?? r.tr ?? "";
-          return "";
-        })
-        .join("\n")
-    : (rows || "");
+  // helpers d'affichage
+  const cls = (val, min, max) =>
+    (val === max ? " tag-green" : "") + (val === min ? " tag-red" : "");
+  const safe = (v) => (v === null || v === undefined ? "–" : v);
+
+  // rows vient de aggregate(): [{ name, FR:{pts,diff}, EN:{...}, ES:{...}, IT:{...}, totalPts, totalDiff, greens, reds }, ...]
+  const rowsHtml = (rows || []).map((t, i) => {
+    const rank = i + 1;
+
+    // points par ligue (nombre) avec classes min/max
+    const cellsPts = ORDER.map((code) => {
+      const val = Number(t[code]?.pts ?? 0);
+      return `<td class="num${cls(val, minPts[code], maxPts[code])}">${isNaN(val) ? "–" : val}</td>`;
+    }).join("");
+
+    // diff total (nombre signé + vert/rouge selon min/max)
+    const diff = Number(t.totalDiff ?? 0);
+    const diffTxt = isNaN(diff) ? "–" : (diff > 0 ? `+${diff}` : String(diff));
+    const diffClass = isNaN(diff) ? "" : cls(diff, minDiffAll, maxDiffAll);
+
+    // total points (nombre + min/max)
+    const total = Number(t.totalPts ?? 0);
+    const totalClass = isNaN(total) ? "" : cls(total, minTotal, maxTotal);
+
+    return `
+<tr>
+  <td class="rank">${rank}</td>
+  <td class="team">${safe(t.name)}</td>
+  ${cellsPts}
+  <td class="num${diffClass}">${diffTxt}</td>
+  <td class="num total total-col${totalClass}">${isNaN(total) ? "–" : total}</td>
+</tr>`.trim();
+  }).join("\n");
 
   const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26</title>
+  <title>${PAGE_TITLE}</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
@@ -396,32 +418,25 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
 
     .wrap { max-width: 1100px; margin: 0 auto; }
 
-    /* Header / logo */
     .logo { text-align:center; margin-bottom:16px; }
     .logo img { display:block; width:100%; height:auto; max-height:160px; object-fit:contain; margin:0 auto; }
 
-    /* Conteneur table (centre + largeur au contenu) */
     .table-wrap { display:flex; justify-content:center; overflow-x:auto; }
 
-    /* ====== Tableau compact sans “trou” ====== */
     table { border-collapse:collapse; table-layout:fixed; width:max-content; }
     th, td {
-      padding:8px 10px;
-      border-bottom:1px solid var(--line);
-      text-align:center;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
+      padding:8px 10px; border-bottom:1px solid var(--line);
+      text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     }
     th:nth-child(2), td:nth-child(2) { text-align:left; }
 
-    /* Écart minimal entre Équipe et FR */
+    /* écart minimal entre Équipe et FR */
     th:nth-child(2), td:nth-child(2) { padding-right:2px; }
     th:nth-child(3), td:nth-child(3) { padding-left:2px; }
 
     .rank { width:42px; color:var(--muted); }
-    .team { width:1%; white-space:nowrap; }  /* largeur = juste le texte */
-    .num  { width:48px; }                     /* colonnes points compactes */
+    .team { width:1%; white-space:nowrap; }
+    .num  { width:48px; }
 
     tr:hover td { background:#fafafa; }
 
@@ -437,36 +452,35 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
 <body>
   <div class="wrap">
     <div class="logo">
-      <!-- Nom fixe: remplace juste docs/logo.png pour changer le visuel -->
       <img src="logo.png" alt="European MPG Super League" />
     </div>
 
     <div class="table-wrap">
       <table>
         <colgroup>
-          <col style="width:42px">      <!-- # -->
-          <col style="width:1%;">       <!-- Équipe (taille = contenu) -->
-          <col style="width:48px">      <!-- FR -->
-          <col style="width:48px">      <!-- GB -->
-          <col style="width:48px">      <!-- ES -->
-          <col style="width:48px">      <!-- IT -->
-          <col style="width:64px">      <!-- Diff -->
-          <col style="width:72px">      <!-- TOTAL -->
+          <col style="width:42px">
+          <col style="width:1%">
+          <col style="width:48px">
+          <col style="width:48px">
+          <col style="width:48px">
+          <col style="width:48px">
+          <col style="width:64px">
+          <col style="width:72px">
         </colgroup>
         <thead>
           <tr>
             <th class="rank">#</th>
             <th class="team">Équipe</th>
-            <th class="num" title="FR">🇫🇷</th>
-            <th class="num" title="EN">🇬🇧</th>
-            <th class="num" title="ES">🇪🇸</th>
-            <th class="num" title="IT">🇮🇹</th>
+            <th class="num" title="FR">FR</th>
+            <th class="num" title="GB">GB</th>
+            <th class="num" title="ES">ES</th>
+            <th class="num" title="IT">IT</th>
             <th class="num" title="Différence de buts cumulée">Diff +/-</th>
             <th class="num total total-col" title="Points cumulés">TOTAL</th>
           </tr>
         </thead>
         <tbody>
-          ${rowsHtml}
+${rowsHtml}
         </tbody>
       </table>
     </div>
