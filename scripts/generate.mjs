@@ -446,7 +446,7 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
     .total-col { border:2px solid var(--accent); background:var(--accent-bg); border-radius:8px; }
     .total { font-weight:800; }
 
-    .updated { color:var(--muted); font-size:13px; margin-top:12px; text-align:right; }
+    .updated { color:var(--muted); font-size:13px; margin-top:12px; text-align:left; }
   </style>
 </head>
 <body>
