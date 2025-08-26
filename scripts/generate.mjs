@@ -19,6 +19,7 @@ const MPG_PASSWORD = process.env.MPG_PASSWORD || "";
 
 const OUTPUT_DIR = existsSync("docs") ? "docs" : ".";
 const OUTPUT_FILE = path.join(OUTPUT_DIR, "index.html");
+const OUTPUT_SVG  = path.join(OUTPUT_DIR, "board.svg");
 const PAGE_TITLE = "CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26";
 
 for (const k of ORDER) console.log(`URL ${k}:`, LEAGUES[k] ? "(ok via secret)" : "(vide)");
@@ -491,66 +492,88 @@ ${rowsHtml}
 </html>`;
   return html;
 }
-// --- SVG Helper ---
-function buildBoardSvg(standings, updatedAt) {
+
+/* ======================== SVG (affiche mobile – rendu de base) ======================== */
+function buildBoardSvg(aggregated, updatedAt) {
+  const rows = aggregated?.rows || [];
+
   // dimensions portrait pour mobile
   const width = 1080;
   const height = 1920;
-  const rowHeight = 120; // hauteur d'une ligne
-  const colWidths = [100, 300, 100, 100, 100, 100, 150, 150]; // colonnes
 
-  // en-têtes (emoji drapeaux + labels)
+  // layout de base
+  const marginLeft = 30;
+  const startY = 220;        // sous le logo
+  const rowHeight = 120;     // hauteur de ligne
+  const colWidths = [100, 320, 110, 110, 110, 110, 150, 160]; // # | Équipe | FR | GB | ES | IT | Δ | TOTAL
+
   const headers = ["#", "Équipe", "🇫🇷", "🇬🇧", "🇪🇸", "🇮🇹", "Δ", "TOTAL"];
 
-  let y = 200; // position de départ sous le logo
+  // utilitaires
+  const safeNum = (n) => (Number.isFinite(n) ? n : "–");
+  const signed = (n) => (Number.isFinite(n) ? (n > 0 ? `+${n}` : String(n)) : "–");
+
+  let y = startY;
   let svg = `
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%">
-    <style>
-      text { font-family: system-ui, sans-serif; font-size:36px; fill:#111; dominant-baseline:middle; }
-      .header { font-weight: bold; fill: #000; }
-      .updated { font-size:28px; fill:#555; }
-    </style>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
+  <style>
+    text { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; fill:#111; dominant-baseline:middle; }
+    .h  { font-weight:700; font-size:40px; }
+    .c  { font-size:36px; }
+    .muted { fill:#555; }
+    .grid { stroke:#eee; stroke-width:2; }
+  </style>
 
-    <!-- Logo en haut -->
-    <image href="logo.png" x="30" y="30" width="200" height="200"/>
+  <!-- Logo en haut -->
+  <image href="logo.png" x="${marginLeft}" y="20" width="220" height="160"/>
 
-    <!-- En-têtes -->
-  `;
+  <!-- Entêtes -->
+  <g>
+    ${(() => {
+      let x = marginLeft;
+      return headers.map((h, i) => {
+        const cx = x + colWidths[i] / 2;
+        x += colWidths[i];
+        return `<text class="h" x="${cx}" y="${y}" text-anchor="middle">${h}</text>`;
+      }).join("");
+    })()}
+  </g>
+`;
 
-  // dessine les en-têtes
-  let x = 30;
-  for (let i = 0; i < headers.length; i++) {
-    svg += `<text class="header" x="${x + colWidths[i]/2}" y="${y}" text-anchor="middle">${headers[i]}</text>`;
-    x += colWidths[i];
-  }
   y += rowHeight;
 
-  // lignes équipes
-  standings.forEach((team, idx) => {
-    let x = 30;
-    const values = [
-      `#${idx+1}`,
-      team.name,
-      team.FR ?? "–",
-      team.EN ?? "–",
-      team.ES ?? "–",
-      team.IT ?? "–",
-      team.diff ?? "–",
-      team.total ?? "–"
+  // lignes équipes (10 équipes max selon ton cahier des charges)
+  rows.slice(0, 10).forEach((t, i) => {
+    let x = marginLeft;
+    const rank = i + 1;
+    const vals = [
+      `#${rank}`,
+      t.name ?? "",
+      safeNum(t.FR?.pts),
+      safeNum(t.EN?.pts),
+      safeNum(t.ES?.pts),
+      safeNum(t.IT?.pts),
+      signed(t.totalDiff),
+      safeNum(t.totalPts),
     ];
-    for (let i = 0; i < values.length; i++) {
-      svg += `<text x="${x + colWidths[i]/2}" y="${y}" text-anchor="middle">${values[i]}</text>`;
-      x += colWidths[i];
-    }
+
+    // grille horizontale (option légère pour séparer visuellement)
+    svg += `<line class="grid" x1="${marginLeft}" y1="${y}" x2="${width - marginLeft}" y2="${y}"/>`;
+
+    vals.forEach((val, idx) => {
+      const cx = x + colWidths[idx] / 2;
+      svg += `<text class="c" x="${cx}" y="${y + rowHeight / 2}" text-anchor="middle">${val}</text>`;
+      x += colWidths[idx];
+    });
+
     y += rowHeight;
   });
 
-  // footer
-  svg += `<text class="updated" x="30" y="${height-40}" text-anchor="start">
-    Dernière MaJ : ${updatedAt}
-  </text>`;
-
-  svg += `</svg>`;
+  // footer "Dernière MaJ"
+  svg += `
+  <text class="c muted" x="${marginLeft}" y="${height - 40}" text-anchor="start">Dernière MaJ : ${updatedAt}</text>
+</svg>
+`;
   return svg;
 }
 
@@ -579,11 +602,23 @@ function buildBoardSvg(standings, updatedAt) {
     }
 
     const aggregated = aggregate(leaguesData);
+
+    // Horodatage partagé (Paris) pour HTML + SVG
+    const updatedAt = new Intl.DateTimeFormat("fr-FR", {
+      timeZone: "Europe/Paris",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit",
+      hour12: false,
+    }).format(new Date()).replace(",", " à");
+
     const html = buildHtml(aggregated);
+    const svg  = buildBoardSvg(aggregated, updatedAt);
 
     if (OUTPUT_DIR !== "." && !existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
     writeFileSync(OUTPUT_FILE, html, "utf8");
+    writeFileSync(OUTPUT_SVG, svg, "utf8");
     console.log(`💾 Page générée → ${OUTPUT_FILE}`);
+    console.log(`💾 Board SVG   → ${OUTPUT_SVG}`);
   } catch (e) {
     console.error("❌ Erreur durant la génération :", e?.stack || e);
     process.exitCode = 1;
