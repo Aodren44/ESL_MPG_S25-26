@@ -362,12 +362,24 @@ function aggregate(leaguesData) {
 }
 
 /* ======================== RENDU HTML ======================== */
-function buildHtml({ rows /* html des <tr> déjà stylés */, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
+function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
   // Horodatage heure de Paris (pas UTC)
   const updated = new Date().toLocaleString("fr-FR", {
     timeZone: "Europe/Paris",
     hour12: false,
   });
+
+  // rows peut être: tableau de strings "<tr>...</tr>" OU d'objets.
+  // -> On sécurise: si objet, on prend .html ou .tr; sinon on ignore.
+  const rowsHtml = Array.isArray(rows)
+    ? rows
+        .map(r => {
+          if (typeof r === "string") return r;
+          if (r && typeof r === "object") return r.html ?? r.tr ?? "";
+          return "";
+        })
+        .join("\n")
+    : (rows || "");
 
   const html = `<!DOCTYPE html>
 <html lang="fr">
@@ -388,7 +400,7 @@ function buildHtml({ rows /* html des <tr> déjà stylés */, minPts, maxPts, mi
     .logo { text-align:center; margin-bottom:16px; }
     .logo img { display:block; width:100%; height:auto; max-height:160px; object-fit:contain; margin:0 auto; }
 
-    /* Conteneur pour que la table s'adapte à son contenu, centrée */
+    /* Conteneur table (centre + largeur au contenu) */
     .table-wrap { display:flex; justify-content:center; overflow-x:auto; }
 
     /* ====== Tableau compact sans “trou” ====== */
@@ -399,7 +411,7 @@ function buildHtml({ rows /* html des <tr> déjà stylés */, minPts, maxPts, mi
       text-align:center;
       overflow:hidden;
       text-overflow:ellipsis;
-      white-space:nowrap; /* jamais de retour à la ligne dans les cellules */
+      white-space:nowrap;
     }
     th:nth-child(2), td:nth-child(2) { text-align:left; }
 
@@ -413,11 +425,9 @@ function buildHtml({ rows /* html des <tr> déjà stylés */, minPts, maxPts, mi
 
     tr:hover td { background:#fafafa; }
 
-    /* Couleurs min/max (tes classes existantes) */
     .tag-green { background:#e6ffed; }
     .tag-red   { background:#ffecec; }
 
-    /* TOTAL mis en avant */
     .total-col { border:2px solid var(--accent); background:var(--accent-bg); border-radius:8px; }
     .total { font-weight:800; }
 
@@ -427,7 +437,7 @@ function buildHtml({ rows /* html des <tr> déjà stylés */, minPts, maxPts, mi
 <body>
   <div class="wrap">
     <div class="logo">
-      <!-- Utilise un nom fixe pour changer le header sans toucher au code -->
+      <!-- Nom fixe: remplace juste docs/logo.png pour changer le visuel -->
       <img src="logo.png" alt="European MPG Super League" />
     </div>
 
@@ -456,7 +466,7 @@ function buildHtml({ rows /* html des <tr> déjà stylés */, minPts, maxPts, mi
           </tr>
         </thead>
         <tbody>
-          ${rows.join("\n")}
+          ${rowsHtml}
         </tbody>
       </table>
     </div>
