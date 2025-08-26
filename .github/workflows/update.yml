@@ -3,7 +3,7 @@ name: Build & publish site
 on:
   schedule:
     - cron: "0 7 * * *"     # tous les jours à 07:00 UTC (~09:00 Paris)
-  workflow_dispatch: {}      # bouton manuel "Run workflow"
+  workflow_dispatch: {}
 
 jobs:
   build:
@@ -20,13 +20,38 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "npm"            # ✅ active le cache npm
 
-      - name: Install deps
-        run: npm install
+      # ✅ Remplace 'npm install' par une install robuste + retries
+      - name: NPM harden & install (with retries)
+        run: |
+          set -eux
+          npm config set fetch-retries 5
+          npm config set fetch-retry-factor 2
+          npm config set fetch-retry-maxtimeout 60000
+          npm config set audit false
+          npm config set fund false
 
-      # Installe navigateurs + dépendances système de Playwright
-      - name: Install Playwright dependencies
-        run: npx playwright install --with-deps
+          # petite boucle de retry pour npm ci (max 3 tentatives)
+          n=0
+          until [ $n -ge 3 ]; do
+            npm ci --no-audit --prefer-offline && break
+            n=$((n+1))
+            echo "npm ci failed ($n) → retry in 10s"
+            sleep 10
+          done
+
+      # ✅ Installe Playwright + dépendances système, avec retry aussi
+      - name: Install Playwright dependencies (with retries)
+        run: |
+          set -eux
+          n=0
+          until [ $n -ge 3 ]; do
+            npx playwright install --with-deps && break
+            n=$((n+1))
+            echo "playwright install failed ($n) → retry in 10s"
+            sleep 10
+          done
 
       - name: Generate site (scrape + build HTML)
         env:
@@ -36,12 +61,12 @@ jobs:
           MPG_ESL_UK: ${{ secrets.MPG_ESL_UK }}
           MPG_ESL_ES: ${{ secrets.MPG_ESL_ES }}
           MPG_ESL_IT: ${{ secrets.MPG_ESL_IT }}
-          MPG_AUTH_STATE_B64: ${{ secrets.MPG_AUTH_STATE_B64 }} # optionnel si tu l'ajoutes plus tard
+          MPG_AUTH_STATE_B64: ${{ secrets.MPG_AUTH_STATE_B64 }}
         run: |
           mkdir -p docs
           node scripts/generate.mjs
 
-      # Récupération des dumps Playwright pour debug (s'ils existent)
+      # Dumps Playwright si présents (debug)
       - name: Upload debug artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -52,11 +77,11 @@ jobs:
             screenshot-*.png
           if-no-files-found: ignore
 
+      # Push des changements (docs/ → Pages)
       - name: Push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # se recaler sur la dernière version distante pour éviter "fetch first"
           git fetch origin main
           git reset --soft origin/main
           git add docs/ -A
