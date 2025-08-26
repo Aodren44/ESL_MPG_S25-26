@@ -3,30 +3,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Classement MPG — European Star League — S25/26</title>
+  <title>CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26</title>
   <style>
     :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 32px; }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    .updated { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: right; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 24px; }
+    /* ✅ 2) Conteneur centré et plus contenu */
+    .wrap { max-width: 900px; margin: 0 auto; }
+    /* ✅ 1) Titre centré + majuscules */
+    h1 { font-size: 22px; margin: 0 0 12px; text-align: center; text-transform: uppercase; letter-spacing: 0.5px; }
+    .updated { color: var(--muted); font-size: 13px; margin-top: 12px; text-align: right; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     th:nth-child(2), td:nth-child(2) { text-align: left; }
     th { font-weight: 600; }
     tr:hover td { background: #fafafa; }
     .tag-green { background: #e6ffed; }
     .tag-red { background: #ffecec; }
     .rank { width: 42px; color: var(--muted); }
-    .team { width: 280px; }
+    .team { width: 260px; }
     .total { font-weight: 700; }
-    .foot { color: var(--muted); font-size: 12px; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <h1>Classement MPG — European Star League — S25/26</h1>
-  <div class="updated">Mis à jour automatiquement&nbsp;: 26/08/2025 08:11:58</div>
-  <table>
-    <thead>
+  <div class="wrap">
+    <h1>CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26</h1>
+    <table>
+      <thead>
     <tr>
       <th class="rank">#</th>
       <th class="team">Équipe</th>
@@ -35,13 +37,13 @@
       <th class="total" title="Points cumulés">TOTAL</th>
     </tr>
   </thead>
-    <tbody>
+      <tbody>
     
           <tr>
             <td class="rank">1</td>
             <td>Moncabounboa</td>
             <td class="tag-green">6</td><td class="">3</td><td class="tag-green">4</td><td class="tag-green">3</td>
-            <td class="tag-green">6</td>
+            <td class="tag-green">+6</td>
             <td class="total tag-green">16</td>
           </tr>
 
@@ -49,7 +51,7 @@
             <td class="rank">2</td>
             <td>FC Méplanku</td>
             <td class="tag-green">6</td><td class="tag-green">6</td><td class="">1</td><td class="">1</td>
-            <td class="">3</td>
+            <td class="">+3</td>
             <td class="total ">14</td>
           </tr>
 
@@ -65,7 +67,7 @@
             <td class="rank">4</td>
             <td>Pionniers Tours 🏈</td>
             <td class="">2</td><td class="">3</td><td class="">3</td><td class="tag-green">3</td>
-            <td class="">1</td>
+            <td class="">+1</td>
             <td class="total ">11</td>
           </tr>
 
@@ -73,7 +75,7 @@
             <td class="rank">5</td>
             <td>ElProfesor deRosario</td>
             <td class="">2</td><td class="tag-green">6</td><td class="">3</td><td class="tag-red">0</td>
-            <td class="">2</td>
+            <td class="">+2</td>
             <td class="total ">11</td>
           </tr>
 
@@ -81,7 +83,7 @@
             <td class="rank">6</td>
             <td>New Team</td>
             <td class="">2</td><td class="tag-green">6</td><td class="">2</td><td class="tag-red">0</td>
-            <td class="">3</td>
+            <td class="">+3</td>
             <td class="total ">10</td>
           </tr>
 
@@ -117,7 +119,10 @@
             <td class="total tag-red">4</td>
           </tr>
   </tbody>
-  </table>
-  <p class="foot">Verts = meilleure valeur de la colonne • Rouges = pire valeur de la colonne. Les couleurs de TOTAL et Diff +/- sont informatives (non prises en compte dans les tie‑breakers).</p>
+    </table>
+    <!-- ✅ 4) Légende supprimée -->
+    <!-- ✅ 5) Libellé déplacé SOUS le tableau + wording exact -->
+    <div class="updated">Dernière Mise à jour : 26/08/2025 à 08:37:44</div>
+  </div>
 </body>
 </html>
