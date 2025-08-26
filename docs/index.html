@@ -8,19 +8,10 @@
     :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; --accent:#b9c2ff; --accent-bg:#f4f6ff; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 24px; }
 
-    /* Conteneur centré et largeur maîtrisée */
     .wrap { max-width: 900px; margin: 0 auto; }
 
-    /* === LOGO === */
     .logo { text-align: center; margin-bottom: 16px; }
-    .logo img {
-      display: block;
-      width: 100%;
-      height: auto;
-      max-height: 160px;
-      object-fit: contain;
-      margin: 0 auto;
-    }
+    .logo img { display:block; width:100%; height:auto; max-height:160px; object-fit:contain; margin:0 auto; }
 
     /* ====== Tableau ====== */
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -30,24 +21,23 @@
       text-align: center;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap; /* empêche les retours à la ligne */
+      white-space: nowrap;            /* jamais de retour à la ligne */
     }
     th:nth-child(2), td:nth-child(2) { text-align: left; }
 
     /* Écart minimal entre Équipe et FR */
-    th:nth-child(2), td:nth-child(2) { padding-right: 4px; }
+    th:nth-child(2), td:nth-child(2) { padding-right: 2px; }
     th:nth-child(3), td:nth-child(3) { padding-left: 2px; }
 
     .rank { width: 42px; color: var(--muted); }
-    .team { width: auto; white-space: nowrap; }  /* prend tout l'espace restant */
-    .num  { width: 48px; }                        /* colonnes points compactes */
+    .team { width: 1%; white-space: nowrap; }  /* <-- serre la colonne Équipe au texte */
+    .num  { width: 48px; }                      /* colonnes points compactes */
 
     tr:hover td { background: #fafafa; }
 
     .tag-green { background: #e6ffed; }
     .tag-red   { background: #ffecec; }
 
-    /* TOTAL en valeur */
     .total-col { border: 2px solid var(--accent); background: var(--accent-bg); border-radius: 8px; }
     .total { font-weight: 800; }
 
@@ -63,13 +53,13 @@
     <table>
       <colgroup>
         <col style="width:42px">      <!-- # -->
-        <col>                          <!-- Équipe (auto, prend le reste) -->
-        <col style="width:48px">       <!-- FR -->
-        <col style="width:48px">       <!-- GB -->
-        <col style="width:48px">       <!-- ES -->
-        <col style="width:48px">       <!-- IT -->
-        <col style="width:64px">       <!-- Diff -->
-        <col style="width:72px">       <!-- TOTAL -->
+        <col style="width:1%;">       <!-- Équipe (min-width = contenu) -->
+        <col style="width:48px">      <!-- FR -->
+        <col style="width:48px">      <!-- GB -->
+        <col style="width:48px">      <!-- ES -->
+        <col style="width:48px">      <!-- IT -->
+        <col style="width:64px">      <!-- Diff -->
+        <col style="width:72px">      <!-- TOTAL -->
       </colgroup>
       <thead>
         <tr>
@@ -91,7 +81,6 @@
           <td class="num tag-green">+6</td>
           <td class="num total total-col tag-green">16</td>
         </tr>
-
         <tr>
           <td class="rank">2</td>
           <td class="team">FC Méplanku</td>
@@ -99,7 +88,6 @@
           <td class="num">+3</td>
           <td class="num total total-col">14</td>
         </tr>
-
         <tr>
           <td class="rank">3</td>
           <td class="team">Monster 83</td>
@@ -107,7 +95,6 @@
           <td class="num">0</td>
           <td class="num total total-col">11</td>
         </tr>
-
         <tr>
           <td class="rank">4</td>
           <td class="team">Pionniers Tours 🏈</td>
@@ -115,7 +102,6 @@
           <td class="num">+1</td>
           <td class="num total total-col">11</td>
         </tr>
-
         <tr>
           <td class="rank">5</td>
           <td class="team">ElProfesor deRosario</td>
@@ -123,7 +109,6 @@
           <td class="num">+2</td>
           <td class="num total total-col">11</td>
         </tr>
-
         <tr>
           <td class="rank">6</td>
           <td class="team">New Team</td>
@@ -131,7 +116,6 @@
           <td class="num">+3</td>
           <td class="num total total-col">10</td>
         </tr>
-
         <tr>
           <td class="rank">7</td>
           <td class="team">Malantate FC</td>
@@ -139,7 +123,6 @@
           <td class="num">-3</td>
           <td class="num total total-col">9</td>
         </tr>
-
         <tr>
           <td class="rank">8</td>
           <td class="team">Football team Graou</td>
@@ -147,7 +130,6 @@
           <td class="num">-2</td>
           <td class="num total total-col">6</td>
         </tr>
-
         <tr>
           <td class="rank">9</td>
           <td class="team">RedBull vodka</td>
@@ -155,7 +137,6 @@
           <td class="num">-4</td>
           <td class="num total total-col tag-red">4</td>
         </tr>
-
         <tr>
           <td class="rank">10</td>
           <td class="team">ES Pennoise</td>
