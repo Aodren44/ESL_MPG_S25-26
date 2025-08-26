@@ -42,8 +42,7 @@ function canonicalName(name) {
   return String(name || "").trim();
 }
 function fmtSigned(n) {
-  if (n > 0) return `+${n}`;
-  return String(n);
+  return n > 0 ? `+${n}` : String(n);
 }
 
 async function acceptCookiesRobust(page) {
@@ -330,8 +329,8 @@ function aggregate(leaguesData) {
     t.totalDiff = ORDER.reduce((s, c) => s + (t[c].diff || 0), 0);
   }
 
-  const minPts = {},
-    maxPts = {};
+  // Min/Max par colonne
+  const minPts = {}, maxPts = {};
   for (const code of ORDER) {
     const vals = Array.from(teams.values()).map((t) => t[code].pts || 0);
     minPts[code] = vals.length ? Math.min(...vals) : 0;
@@ -344,11 +343,13 @@ function aggregate(leaguesData) {
   const minDiffAll = diffs.length ? Math.min(...diffs) : 0;
   const maxDiffAll = diffs.length ? Math.max(...diffs) : 0;
 
+  // Compter verts/rouges FR/EN/ES/IT
   for (const t of teams.values()) {
     t.greens = ORDER.reduce((s, c) => s + (t[c].pts === maxPts[c] ? 1 : 0), 0);
     t.reds = ORDER.reduce((s, c) => s + (t[c].pts === minPts[c] ? 1 : 0), 0);
   }
 
+  // Tri final
   const rows = Array.from(teams.values()).sort((a, b) => {
     if (b.totalPts !== a.totalPts) return b.totalPts - a.totalPts;
     if (b.greens !== a.greens) return b.greens - a.greens;
@@ -362,12 +363,7 @@ function aggregate(leaguesData) {
 
 /* ======================== RENDU HTML ======================== */
 function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
-  const updated = (function fmtDateFR(d = new Date()) {
-    const pad = (n) => String(n).padStart(2, "0");
-    const date = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
-    const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-    return `${date} à ${time}`;
-  })();
+  const updated = fmtDateFR(new Date());
 
   const style = `
   <style>
@@ -377,14 +373,13 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
     /* Conteneur centré et largeur maîtrisée */
     .wrap { max-width: 900px; margin: 0 auto; }
 
-    /* === LOGO (nouveau) === */
+    /* === LOGO === */
     .logo { text-align: center; margin-bottom: 16px; }
     .logo img {
-      /* Le logo prendra EXACTEMENT la largeur du tableau */
       display: block;
-      width: 100%;
+      width: 100%;        /* pile la largeur du conteneur (donc du tableau) */
       height: auto;
-      max-height: 160px;  /* ← ajuste si tu veux plus grand/petit (ex: 140/180) */
+      max-height: 160px;  /* ajuste si besoin (140/180/etc.) */
       object-fit: contain;
       margin: 0 auto;
     }
@@ -394,7 +389,7 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
     th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     th:nth-child(2), td:nth-child(2) { text-align: left; }
 
-    /* Réduction de l’écart entre Équipe et 🇫🇷 */
+    /* Réduction écart entre Équipe et 🇫🇷 */
     th:nth-child(2), td:nth-child(2) { padding-right: 6px; }
     th:nth-child(3), td:nth-child(3) { padding-left: 6px; }
 
@@ -406,11 +401,10 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
     .tag-green { background: #e6ffed; }
     .tag-red { background: #ffecec; }
 
-    /* TOTAL mis en valeur */
+    /* TOTAL en valeur */
     .total-col { border: 2px solid var(--accent); background: var(--accent-bg); border-radius: 8px; }
     .total { font-weight: 800; }
 
-    /* Libellé de mise à jour */
     .updated { color: var(--muted); font-size: 13px; margin-top: 12px; text-align: right; }
   </style>`.trim();
 
@@ -419,7 +413,7 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
     <tr>
       <th class="rank">#</th>
       <th class="team">Équipe</th>
-      ${["FR","EN","ES","IT"].map((c) => `<th class="num" title="\${c}">\${({"FR":"🇫🇷","EN":"🇬🇧","ES":"🇪🇸","IT":"🇮🇹"})[c]}</th>`).join("")}
+      ${ORDER.map((c) => `<th class="num" title="${c}">${HEADERS[c]}</th>`).join("")}
       <th class="num" title="Différence de buts cumulée">Diff +/-</th>
       <th class="num total total-col" title="Points cumulés">TOTAL</th>
     </tr>
@@ -428,22 +422,14 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
   const tbody = `
   <tbody>
     ${rows.map((t, i) => {
-      const cellsLeagues = ["FR","EN","ES","IT"].map((c) => {
+      const cellsLeagues = ORDER.map((c) => {
         const v = t[c].pts || 0;
-        const cls = v === maxPts[c] ? "tag-green" : v === (function(vals){return vals.length?Math.min(...vals):0})([]) ? "tag-red" : "";
+        const cls = v === maxPts[c] ? "tag-green" : v === minPts[c] ? "tag-red" : "";
         return `<td class="num ${cls}">${v}</td>`;
       }).join("");
 
-      const totals = rows.map(r => r.totalPts);
-      const diffs  = rows.map(r => r.totalDiff);
-      const minTotal = totals.length ? Math.min(...totals) : 0;
-      const maxTotal = totals.length ? Math.max(...totals) : 0;
-      const minDiffAll = diffs.length ? Math.min(...diffs) : 0;
-      const maxDiffAll = diffs.length ? Math.max(...diffs) : 0;
-
       const clsTotal = t.totalPts === maxTotal ? "tag-green" : t.totalPts === minTotal ? "tag-red" : "";
       const clsDiff  = t.totalDiff === maxDiffAll ? "tag-green" : t.totalDiff === minDiffAll ? "tag-red" : "";
-      const fmtSigned = (n) => n > 0 ? \`+\${n}\` : String(n);
 
       return `
         <tr>
@@ -462,22 +448,19 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26</title>
+  <title>${PAGE_TITLE}</title>
   ${style}
 </head>
 <body>
   <div class="wrap">
-    <!-- Logo centré au-dessus du tableau -->
     <div class="logo">
-      <img src="logo-esl.png" alt="European MPG Super League" />
+      <img src="Spurs_Logo_ESL_25-26.png" alt="European MPG Super League" />
     </div>
-
     <table>
       ${thead}
       ${tbody}
     </table>
-
-    <div class="updated">Dernière Mise à jour : ${updated}</div>
+    <div class="updated">Dernière Mise à jour : ${fmtDateFR(new Date())}</div>
   </div>
 </body>
 </html>`.trim();
@@ -499,6 +482,7 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
       timezoneId: "Europe/Paris",
     });
 
+    // Tentative login une fois
     await loginIfNeeded(context);
 
     const leaguesData = {};
