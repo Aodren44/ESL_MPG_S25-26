@@ -491,6 +491,68 @@ ${rowsHtml}
 </html>`;
   return html;
 }
+// --- SVG Helper ---
+function buildBoardSvg(standings, updatedAt) {
+  // dimensions portrait pour mobile
+  const width = 1080;
+  const height = 1920;
+  const rowHeight = 120; // hauteur d'une ligne
+  const colWidths = [100, 300, 100, 100, 100, 100, 150, 150]; // colonnes
+
+  // en-têtes (emoji drapeaux + labels)
+  const headers = ["#", "Équipe", "🇫🇷", "🇬🇧", "🇪🇸", "🇮🇹", "Δ", "TOTAL"];
+
+  let y = 200; // position de départ sous le logo
+  let svg = `
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%">
+    <style>
+      text { font-family: system-ui, sans-serif; font-size:36px; fill:#111; dominant-baseline:middle; }
+      .header { font-weight: bold; fill: #000; }
+      .updated { font-size:28px; fill:#555; }
+    </style>
+
+    <!-- Logo en haut -->
+    <image href="logo.png" x="30" y="30" width="200" height="200"/>
+
+    <!-- En-têtes -->
+  `;
+
+  // dessine les en-têtes
+  let x = 30;
+  for (let i = 0; i < headers.length; i++) {
+    svg += `<text class="header" x="${x + colWidths[i]/2}" y="${y}" text-anchor="middle">${headers[i]}</text>`;
+    x += colWidths[i];
+  }
+  y += rowHeight;
+
+  // lignes équipes
+  standings.forEach((team, idx) => {
+    let x = 30;
+    const values = [
+      `#${idx+1}`,
+      team.name,
+      team.FR ?? "–",
+      team.EN ?? "–",
+      team.ES ?? "–",
+      team.IT ?? "–",
+      team.diff ?? "–",
+      team.total ?? "–"
+    ];
+    for (let i = 0; i < values.length; i++) {
+      svg += `<text x="${x + colWidths[i]/2}" y="${y}" text-anchor="middle">${values[i]}</text>`;
+      x += colWidths[i];
+    }
+    y += rowHeight;
+  });
+
+  // footer
+  svg += `<text class="updated" x="30" y="${height-40}" text-anchor="start">
+    Dernière MaJ : ${updatedAt}
+  </text>`;
+
+  svg += `</svg>`;
+  return svg;
+}
 
 /* ======================== MAIN ======================== */
 (async () => {
