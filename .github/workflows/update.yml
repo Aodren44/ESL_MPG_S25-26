@@ -21,36 +21,28 @@ jobs:
         with:
           node-version: "20"
 
-      # ✅ Remplace 'npm install' par une install robuste + retries
-      - name: NPM harden & install (with retries)
+      # ✅ Installe Playwright (lib JS) avec npm
+      - name: Install Playwright (JS package)
         run: |
           set -eux
+          # crée un package.json minimal s'il n'existe pas
+          test -f package.json || echo '{"name":"mpg-esl","private":true}' > package.json
+
+          # durcissement npm + retries
           npm config set fetch-retries 5
           npm config set fetch-retry-factor 2
           npm config set fetch-retry-maxtimeout 60000
           npm config set audit false
           npm config set fund false
 
-          # petite boucle de retry pour npm ci (max 3 tentatives)
-          n=0
-          until [ $n -ge 3 ]; do
-            npm ci --no-audit --prefer-offline && break
-            n=$((n+1))
-            echo "npm ci failed ($n) → retry in 10s"
-            sleep 10
-          done
+          # installe la librairie Playwright
+          npm install --no-audit --prefer-offline playwright@^1.46.0
 
-      # ✅ Installe Playwright + dépendances système, avec retry aussi
-      - name: Install Playwright dependencies (with retries)
+      # ✅ Installe navigateurs Chromium + dépendances système
+      - name: Install Playwright browsers (with deps)
         run: |
           set -eux
-          n=0
-          until [ $n -ge 3 ]; do
-            npx playwright install --with-deps && break
-            n=$((n+1))
-            echo "playwright install failed ($n) → retry in 10s"
-            sleep 10
-          done
+          npx playwright install --with-deps chromium
 
       - name: Generate site (scrape + build HTML)
         env:
@@ -65,7 +57,7 @@ jobs:
           mkdir -p docs
           node scripts/generate.mjs
 
-      # Dumps Playwright si présents (debug)
+      # Récupération dumps Playwright si échec
       - name: Upload debug artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -76,7 +68,6 @@ jobs:
             screenshot-*.png
           if-no-files-found: ignore
 
-      # Push des changements (docs/ → Pages)
       - name: Push changes
         run: |
           git config --global user.name "github-actions[bot]"
