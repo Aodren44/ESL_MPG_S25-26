@@ -432,18 +432,17 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
       .join("\n")}
   </tbody>`.trim();
 
-  const html = `
+const html = `
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${PAGE_TITLE}</title>
-  ${style}
+  ...
 </head>
 <body>
   <div class="wrap">
-    <h1>${PAGE_TITLE}</h1>
+    <div class="logo">
+      <img src="Spurs_Logo_ESL_25-26.png" alt="European MPG Super League" />
+    </div>
     <table>
       ${thead}
       ${tbody}
@@ -452,6 +451,7 @@ function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDi
   </div>
 </body>
 </html>`.trim();
+
 
   return html;
 }
