@@ -22,30 +22,74 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nowStr = () =>
   new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
 
-async function maybeClick(page, selectorOrText) {
-  try {
-    const el = await page.$(selectorOrText);
-  if (el) await el.click({ delay: 50 });
-  } catch {}
+async function maybeClickAny(pageOrFrame, selectors, timeout = 1500) {
+  for (const sel of selectors) {
+    try {
+      const loc = pageOrFrame.locator(sel).first();
+      await loc.waitFor({ state: "visible", timeout });
+      await loc.click({ timeout });
+      return true;
+    } catch {}
+  }
+  return false;
+}
+
+async function acceptConsentsEverywhere(page) {
+  const btnSelectors = [
+    'button:has-text("Tout accepter")',
+    'button:has-text("Accepter")',
+    'button:has-text("Accept all")',
+    'button:has-text("Accept")',
+    'text=Tout accepter',
+    'text=Accepter',
+    'text=Accept all',
+    'text=Accept',
+  ];
+  // Page principale
+  await maybeClickAny(page, btnSelectors);
+  // Dans les iframes (consent CMP)
+  for (const f of page.frames()) {
+    await maybeClickAny(f, btnSelectors);
+  }
 }
 
 async function login(page) {
-  await page.goto("https://mpg.football/login", { waitUntil: "networkidle" });
+  // Augmente les timeouts et évite les soucis GH Actions
+  page.setDefaultTimeout(60000);
+  page.setDefaultNavigationTimeout(60000);
 
-  // Gestion éventuelle du bandeau cookies
-  await maybeClick(page, 'button:has-text("Accepter")');
-  await maybeClick(page, 'button:has-text("Tout accepter")');
-  await maybeClick(page, 'button:has-text("Accept")');
+  await page.goto("https://mpg.football/login", { waitUntil: "domcontentloaded" });
+  await acceptConsentsEverywhere(page);
 
-  await page.fill('input[type="email"]', EMAIL);
-  await page.fill('input[type="password"]', PASSWORD);
+  // Dans certains cas, /login redirige vers une autre route, on force un accès protégé
+  // pour déclencher la page de login si besoin.
+  if (!(await page.locator('input[type="email"], input[name="email"], input#email, input[name="username"]').first().isVisible().catch(() => false))) {
+    await page.goto("https://mpg.football/account", { waitUntil: "domcontentloaded" });
+    await acceptConsentsEverywhere(page);
+  }
 
-  await page.click('button[type="submit"]');
+  const emailInput = page.locator('input[type="email"], input[name="email"], input#email, input[name="username"]').first();
+  const passInput  = page.locator('input[type="password"], input[name="password"], input#password').first();
+  await emailInput.waitFor({ state: "visible" });
+  await passInput.waitFor({ state: "visible" });
+
+  await emailInput.fill(EMAIL);
+  await passInput.fill(PASSWORD);
+
+  // Bouton submit (plusieurs variantes)
+  await maybeClickAny(page, [
+    'button[type="submit"]',
+    'button:has-text("Se connecter")',
+    'button:has-text("Connexion")',
+    'button:has-text("Login")',
+  ], 4000);
+
+  // Attendre la fin de la nav + disparition du formulaire
   await page.waitForLoadState("networkidle");
 }
 
 /* ==========================
-   SCRAPE ROBUSTE (corrigé)
+   SCRAPE ROBUSTE (points)
    ========================== */
 async function scrapeLeague(page, url) {
   const out = [];
@@ -55,7 +99,7 @@ async function scrapeLeague(page, url) {
     return out;
   }
 
-  // Attendre qu’un tableau OU des "ranking-row" existent
+  // Attendre soit des ranking-rows, soit un tableau
   try {
     await page.waitForFunction(() => {
       return (
@@ -69,110 +113,80 @@ async function scrapeLeague(page, url) {
     return out;
   }
 
-  // Tout parser côté page pour limiter les va-et-vient
   const rows = await page.evaluate(() => {
     const clean = (s) => (s || "").trim().replace(/\s+/g, " ");
-    const pickInt = (s) => {
+    const takeInt = (s) => {
       const m = clean(s).match(/-?\d+/);
       return m ? parseInt(m[0], 10) : NaN;
     };
 
     const result = [];
 
-    // 1) Cas prioritaire : listes avec data-testid=ranking-row
+    // 1) Structure avec data-testid=ranking-row (prioritaire)
     const rankRows = Array.from(document.querySelectorAll("[data-testid=ranking-row]"));
     if (rankRows.length) {
       for (const r of rankRows) {
-        // Nom d’équipe
         let team =
           clean(r.querySelector("[data-testid=team-name]")?.textContent) ||
-          clean(r.querySelector(".team-name,.name")?.textContent) ||
-          clean(r.textContent);
+          clean(r.querySelector(".team-name,.name")?.textContent);
+        if (!team) {
+          // fallback: texte le plus "verbeux" non numérique
+          const txts = Array.from(r.querySelectorAll("*")).map((el) => clean(el.textContent)).filter(Boolean);
+          team = txts.filter((t) => /[A-Za-zÀ-ÿ]/.test(t)).sort((a, b) => b.length - a.length)[0];
+        }
+        if (team) team = team.split(" — ")[0].split(" - ")[0].split(",")[0];
 
-        // Pointage : chercher un libellé "Pts/Points" DANS la ligne
-        let ptsText = "";
-        // 1a) élément dont le texte ressemble à "Pts 4" ou "Points : 4"
-        const elPts = Array.from(r.querySelectorAll("*")).find((el) =>
-          /(?:^|\b)(pts?|points?)(?:\b|[^a-z])/i.test(clean(el.textContent))
-        );
-        if (elPts) {
-          const m = clean(elPts.textContent).match(/(?:pts?|points?)\s*:?\s*(-?\d+)/i);
-          if (m) ptsText = m[1];
-        }
-        // 1b) si pas trouvé, chercher un attribut data-title/aria-label parlant
-        if (!ptsText) {
-          const elAttr = Array.from(r.querySelectorAll("*")).find((el) => {
-            const t = clean(el.getAttribute?.("title"));
-            const a = clean(el.getAttribute?.("aria-label"));
-            return /pts|points/i.test(t) || /pts|points/i.test(a);
-          });
-          if (elAttr) {
-            const m = (clean(elAttr.getAttribute("title")) || clean(elAttr.getAttribute("aria-label")) || "")
-              .match(/-?\d+/);
-            if (m) ptsText = m[0];
-          }
-        }
-        // 1c) ultimissime secours : repérer "Pts 4" dans le texte de la ligne
-        if (!ptsText) {
-          const m = clean(r.textContent).match(/(?:pts?|points?)\s*:?\s*(-?\d+)/i);
-          if (m) ptsText = m[1];
-        }
-        // 1d) tout dernier recours (pour ne PAS renvoyer vide) : prendre le nombre
-        //     situé après le nom de l’équipe, pas le dernier
-        let points = NaN;
-        if (ptsText) {
-          points = parseInt(ptsText, 10);
+        // Points : chercher "Pts/Points : N" dans la ligne
+        let pts = NaN;
+        const textLine = clean(r.textContent);
+        let m = textLine.match(/(?:\bpts?|\bpoints?)\s*:?\s*(-?\d+)/i);
+        if (m) {
+          pts = parseInt(m[1], 10);
         } else {
-          const text = clean(r.textContent);
-          const nums = text.match(/-?\d+/g) || [];
-          if (nums.length) {
-            // éviter de prendre un "+/-" : privilégier un nombre non précédé de +/-
-            const good = nums.find((n) => !new RegExp(`[+\\-]\\s*${n}`).test(text));
-            points = parseInt(good || nums[0], 10);
+          // sinon, tenter des éléments "pts"
+          const cand = Array.from(r.querySelectorAll("*")).find((el) =>
+            /pts|points/i.test(clean(el.textContent)) ||
+            /pts|points/i.test(clean(el.getAttribute?.("title"))) ||
+            /pts|points/i.test(clean(el.getAttribute?.("aria-label")))
+          );
+          if (cand) {
+            const fromAttr = clean(cand.getAttribute?.("title")) || clean(cand.getAttribute?.("aria-label")) || clean(cand.textContent);
+            const mm = fromAttr.match(/-?\d+/);
+            if (mm) pts = parseInt(mm[0], 10);
           }
         }
 
-        if (team && Number.isFinite(points)) {
-          // nettoyage léger nom d’équipe
-          team = team.split(" — ")[0].split(" - ")[0].split(",")[0];
-          result.push({ team, points });
-        }
+        if (team && Number.isFinite(pts)) result.push({ team, points: pts });
       }
       return result;
     }
 
-    // 2) Fallback : véritables tableaux <table>
+    // 2) Fallback tableau classique
     const headerEls = Array.from(document.querySelectorAll("thead th, [role=columnheader]"));
     const headers = headerEls.map((h) => clean(h.textContent).toLowerCase());
     let idxTeam = headers.findIndex((h) => /(équipe|team)/.test(h));
     let idxPts  = headers.findIndex((h) => /^(pts|points)\b/.test(h));
 
-    const lineEls = Array.from(
-      document.querySelectorAll("tbody tr, [role=rowgroup] [role=row]")
-    );
-
+    const lineEls = Array.from(document.querySelectorAll("tbody tr, [role=rowgroup] [role=row]"));
     for (const tr of lineEls) {
       const cells = Array.from(tr.querySelectorAll("td, [role=cell], th, div"));
       const texts = cells.map((c) => clean(c.textContent)).filter(Boolean);
 
-      // Team
       let team = idxTeam >= 0 && idxTeam < texts.length ? texts[idxTeam] : null;
       if (!team) {
         team = texts.filter((t) => /[A-Za-zÀ-ÿ]/.test(t)).sort((a, b) => b.length - a.length)[0];
       }
       if (team) team = team.split(" — ")[0].split(" - ")[0].split(",")[0];
 
-      // Points
-      let points = NaN;
+      let pts = NaN;
       if (idxPts >= 0 && idxPts < texts.length) {
-        points = pickInt(texts[idxPts]);
+        pts = takeInt(texts[idxPts]);
       } else {
-        // essayer de repérer "Pts 4" dans la ligne
-        const m = clean(tr.textContent).match(/(?:pts?|points?)\s*:?\s*(-?\d+)/i);
-        if (m) points = parseInt(m[1], 10);
+        const m = clean(tr.textContent).match(/(?:\bpts?|\bpoints?)\s*:?\s*(-?\d+)/i);
+        if (m) pts = parseInt(m[1], 10);
       }
 
-      if (team && Number.isFinite(points)) result.push({ team, points });
+      if (team && Number.isFinite(pts)) result.push({ team, points: pts });
     }
 
     return result;
@@ -301,7 +315,10 @@ function renderHTML(table) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
   const page = await browser.newPage();
 
   await login(page);
