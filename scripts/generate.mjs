@@ -1,633 +1,333 @@
 // scripts/generate.mjs
 import { chromium } from "playwright";
-import { writeFileSync, mkdirSync, existsSync } from "node:fs";
-import path from "node:path";
+import { writeFileSync, mkdirSync } from "node:fs";
 
-/* ======================== CONFIG ======================== */
-const ORDER = ["FR", "EN", "ES", "IT"];
-const HEADERS = { FR: "🇫🇷", EN: "🇬🇧", ES: "🇪🇸", IT: "🇮🇹" };
-
+// --- CONFIG ---
 const LEAGUES = {
-  FR: process.env.MPG_ESL_FR || "",
-  EN: process.env.MPG_ESL_UK || "",
-  ES: process.env.MPG_ESL_ES || "",
-  IT: process.env.MPG_ESL_IT || "",
+  FR: "https://mpg.football/league/mpg_league_N382D585/mpg_division_N382D585_10_1/ranking/general",
+  EN: "https://mpg.football/league/mpg_league_N382L3SN/mpg_division_N382L3SN_10_1/ranking/general",
+  ES: "https://mpg.football/league/mpg_league_N382NGDF/mpg_division_N382NGDF_10_1/ranking/general",
+  IT: "https://mpg.football/league/mpg_league_N382M95P/mpg_division_N382M95P_10_1/ranking/general",
 };
 
-const MPG_EMAIL = process.env.MPG_EMAIL || "";
-const MPG_PASSWORD = process.env.MPG_PASSWORD || "";
+const EMAIL = process.env.MPG_EMAIL;
+const PASSWORD = process.env.MPG_PASSWORD;
 
-const OUTPUT_DIR = existsSync("docs") ? "docs" : ".";
-const OUTPUT_FILE = path.join(OUTPUT_DIR, "index.html");
-const OUTPUT_SVG  = path.join(OUTPUT_DIR, "board.svg");
-const PAGE_TITLE = "CLASSEMENT MPG - EUROPEAN STAR LEAGUE - S25/26";
+if (!EMAIL || !PASSWORD) {
+  throw new Error("Secrets MPG_EMAIL / MPG_PASSWORD manquants.");
+}
 
-for (const k of ORDER) console.log(`URL ${k}:`, LEAGUES[k] ? "(ok via secret)" : "(vide)");
-
-/* ======================== HELPERS ======================== */
+// --- HELPERS ---
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const nowFR = () => new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
+const nowStr = () =>
+  new Date().toLocaleString("fr-FR", { timeZone: "Europe/Paris" });
 
-function parseIntSafe(raw, fallback = 0) {
-  if (raw == null) return fallback;
-  const m = String(raw).replace(/\u00A0/g, " ").match(/-?\d+/);
-  return m ? parseInt(m[0], 10) : fallback;
-}
-function fmtDateFR(d = new Date()) {
-  const pad = (n) => String(n).padStart(2, "0");
-  const date = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
-  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  return `${date} à ${time}`;
-}
-function canonicalName(name) {
-  return String(name || "").trim();
-}
-function fmtSigned(n) {
-  return n > 0 ? `+${n}` : String(n);
-}
-
-async function acceptCookiesRobust(page) {
-  const selectors = [
-    "#onetrust-accept-btn-handler",
-    "button:has-text('Accepter')",
-    "button:has-text('Tout accepter')",
-    "button:has-text('Accept all')",
-    "button:has-text('Accept')",
-    "[aria-label*='accept']",
-    '[data-testid="uc-accept-all-button"]',
-  ];
-  let clicked = false;
-  for (const sel of selectors) {
-    try {
-      const btn = await page.$(sel);
-      if (btn) {
-        await btn.click().catch(() => {});
-        clicked = true;
-        break;
-      }
-    } catch {}
-  }
-  if (!clicked) {
-    for (const f of page.frames()) {
-      try {
-        const b = await f.$("#onetrust-accept-btn-handler");
-        if (b) {
-          await b.click().catch(() => {});
-          clicked = true;
-          break;
-        }
-      } catch {}
-    }
-  }
-  if (clicked) {
-    console.log("🍪 cookies: accepté");
-    await page.waitForTimeout(300);
-  }
-}
-async function findFieldAcrossFrames(page, selector) {
-  const frames = [page, ...page.frames()];
-  for (const f of frames) {
-    try {
-      const loc = f.locator(selector);
-      const handle = await loc.elementHandle({ timeout: 600 }).catch(() => null);
-      if (handle) return { frame: f, locator: loc };
-    } catch {}
-  }
-  return null;
-}
-async function clickLoginCTA(page) {
-  const selectors = [
-    "a[href*='/login']",
-    "a[href*='connexion']",
-    "button:has-text('Se connecter')",
-    "button:has-text('Connexion')",
-    "button:has-text('Login')",
-    "a:has-text('Se connecter')",
-    "a:has-text('Connexion')",
-    "[data-testid*='login']",
-  ];
-  for (const sel of selectors) {
-    const el = await page.$(sel).catch(() => null);
-    if (el) {
-      console.log("▶️ clique CTA login:", sel);
-      await el.click().catch(() => {});
-      await page.waitForLoadState("networkidle").catch(() => {});
-      await page.waitForTimeout(700);
-      return true;
-    }
-  }
-  return false;
-}
-async function loginRobust(page) {
-  if (!MPG_EMAIL || !MPG_PASSWORD) throw new Error("MPG_EMAIL / MPG_PASSWORD manquants.");
-
-  console.log("→ GOTO home");
-  await page.goto("https://mpg.football/", { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-  await page.waitForTimeout(800);
-  await acceptCookiesRobust(page);
-
-  const loginUrls = ["https://mpg.football/login", "https://mpg.football/connexion", "https://mpg.football/auth/login"];
-  for (const u of loginUrls) {
-    console.log("→ tentative URL login:", u);
-    await page.goto(u, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-    await page.waitForTimeout(600);
-    await acceptCookiesRobust(page);
-    const found = await findFieldAcrossFrames(
-      page,
-      "input[type='email'], input[name='email'], #email, input[autocomplete='email']"
-    );
-    if (found) {
-      console.log("✅ Champ email trouvé via URL directe, frame:", found.frame.url());
-      break;
-    }
-  }
-
-  let emailField = await findFieldAcrossFrames(
-    page,
-    "input[type='email'], input[name='email'], #email, input[autocomplete='email']"
-  );
-  if (!emailField) {
-    const clicked = await clickLoginCTA(page);
-    if (clicked) {
-      emailField = await findFieldAcrossFrames(
-        page,
-        "input[type='email'], input[name='email'], #email, input[autocomplete='email']"
-      );
-    }
-  }
-  if (!emailField) throw new Error("Formulaire de connexion introuvable (email).");
-
-  const pwdField = await findFieldAcrossFrames(
-    page,
-    "input[type='password'], input[name='password'], #password, input[autocomplete='current-password']"
-  );
-  if (!pwdField) throw new Error("Champ mot de passe introuvable.");
-
-  await emailField.locator.fill(MPG_EMAIL, { timeout: 30000 });
-  await pwdField.locator.fill(MPG_PASSWORD, { timeout: 30000 });
-
-  const submitSelectors = [
-    "button[type='submit']",
-    "button:has-text('Se connecter')",
-    "button:has-text('Connexion')",
-    "button:has-text('Log in')",
-    "button:has-text('Login')",
-    "input[type='submit']",
-  ];
-  let submitted = false;
-  for (const sel of submitSelectors) {
-    try {
-      const btn = await emailField.frame.$(sel);
-      if (btn) {
-        await btn.click().catch(() => {});
-        console.log("📨 Credentials soumis (via:", sel, ")");
-        submitted = true;
-        break;
-      }
-    } catch {}
-  }
-  if (!submitted) {
-    try {
-      await pwdField.locator.press("Enter");
-      console.log("↩️ Submit via Enter");
-    } catch {}
-  }
-
-  await page.waitForLoadState("networkidle", { timeout: 60000 }).catch(() => {});
-  await page.waitForURL(/mpg\.football\/(dashboard|league)/, { timeout: 60000 }).catch(() => {});
-  console.log("✅ Login tenté, url actuelle:", page.url());
-}
-async function loginIfNeeded(context) {
-  const page = await context.newPage();
+async function maybeClick(page, selectorOrText) {
   try {
-    await loginRobust(page);
-    const ok = /mpg\.football\/(dashboard|league)/.test(page.url());
-    console.log(ok ? "✅ Login OK" : "⚠️ Login non confirmé (on continue)");
-    return ok;
-  } catch (e) {
-    console.log("⚠️ Login: exception, on continue en invité:", e?.message || e);
-    return false;
-  } finally {
-    await page.close().catch(() => {});
-  }
+    const el = await page.$(selectorOrText);
+  if (el) await el.click({ delay: 50 });
+  } catch {}
 }
 
-/* ======================== SCRAPING ======================== */
+async function login(page) {
+  await page.goto("https://mpg.football/login", { waitUntil: "networkidle" });
+
+  // Gestion éventuelle du bandeau cookies
+  await maybeClick(page, 'button:has-text("Accepter")');
+  await maybeClick(page, 'button:has-text("Tout accepter")');
+  await maybeClick(page, 'button:has-text("Accept")');
+
+  await page.fill('input[type="email"]', EMAIL);
+  await page.fill('input[type="password"]', PASSWORD);
+
+  await page.click('button[type="submit"]');
+  await page.waitForLoadState("networkidle");
+}
+
+/* ==========================
+   SCRAPE ROBUSTE (corrigé)
+   ========================== */
 async function scrapeLeague(page, url) {
   const out = [];
   try {
     await page.goto(url, { waitUntil: "networkidle" });
   } catch {
-    return out; // ligue pas accessible
+    return out;
   }
 
-  // S’assurer que le tableau est bien en place (apps React -> parfois "networkidle" ne suffit pas)
+  // Attendre qu’un tableau OU des "ranking-row" existent
   try {
     await page.waitForFunction(() => {
-      const hasTable = document.querySelector("table");
-      const hasRows =
-        document.querySelector("tbody tr,[role=rowgroup] [role=row],[data-testid=ranking-row]");
-      return hasTable && hasRows;
-    }, { timeout: 10000 });
+      return (
+        document.querySelector("[data-testid=ranking-row]") ||
+        (document.querySelector("table") &&
+          (document.querySelector("tbody tr") ||
+           document.querySelector("[role=rowgroup] [role=row]")))
+      );
+    }, { timeout: 12000 });
   } catch {
     return out;
   }
 
-  // On exécute tout le parsing côté page pour être robuste et rapide
+  // Tout parser côté page pour limiter les va-et-vient
   const rows = await page.evaluate(() => {
-    const getTxt = (el) =>
-      (el?.textContent || "").trim().replace(/\s+/g, " ");
-
-    // 1) Lire les headers pour trouver l’index de "Pts/Points" et "Équipe/Team"
-    const headerEls = Array.from(
-      document.querySelectorAll("thead th, [role=columnheader]")
-    );
-    const headers = headerEls.map((h) => getTxt(h).toLowerCase());
-
-    let idxPts = headers.findIndex((h) => /^(pts|points)\b/.test(h));
-    let idxTeam = headers.findIndex((h) => /(équipe|team)/.test(h));
-
-    // 2) Récupérer les lignes (plusieurs structures possibles)
-    const lineEls = Array.from(
-      document.querySelectorAll(
-        "tbody tr, [role=rowgroup] [role=row], [data-testid=ranking-row]"
-      )
-    );
+    const clean = (s) => (s || "").trim().replace(/\s+/g, " ");
+    const pickInt = (s) => {
+      const m = clean(s).match(/-?\d+/);
+      return m ? parseInt(m[0], 10) : NaN;
+    };
 
     const result = [];
-    for (const row of lineEls) {
-      // Sauter une éventuelle ligne d’en-tête
-      if (row.querySelector("th")) continue;
 
-      // a) Cas simple: cellules classiques
-      const cells = Array.from(row.querySelectorAll("td, [role=cell], th, div"));
-      const texts = cells.map(getTxt).filter(Boolean);
+    // 1) Cas prioritaire : listes avec data-testid=ranking-row
+    const rankRows = Array.from(document.querySelectorAll("[data-testid=ranking-row]"));
+    if (rankRows.length) {
+      for (const r of rankRows) {
+        // Nom d’équipe
+        let team =
+          clean(r.querySelector("[data-testid=team-name]")?.textContent) ||
+          clean(r.querySelector(".team-name,.name")?.textContent) ||
+          clean(r.textContent);
 
-      // b) Extraction du nom d'équipe
-      let team = null;
-      if (idxTeam >= 0 && idxTeam < texts.length) {
-        team = texts[idxTeam];
-      } else {
-        // fallback: plus long texte non purement numérique
+        // Pointage : chercher un libellé "Pts/Points" DANS la ligne
+        let ptsText = "";
+        // 1a) élément dont le texte ressemble à "Pts 4" ou "Points : 4"
+        const elPts = Array.from(r.querySelectorAll("*")).find((el) =>
+          /(?:^|\b)(pts?|points?)(?:\b|[^a-z])/i.test(clean(el.textContent))
+        );
+        if (elPts) {
+          const m = clean(elPts.textContent).match(/(?:pts?|points?)\s*:?\s*(-?\d+)/i);
+          if (m) ptsText = m[1];
+        }
+        // 1b) si pas trouvé, chercher un attribut data-title/aria-label parlant
+        if (!ptsText) {
+          const elAttr = Array.from(r.querySelectorAll("*")).find((el) => {
+            const t = clean(el.getAttribute?.("title"));
+            const a = clean(el.getAttribute?.("aria-label"));
+            return /pts|points/i.test(t) || /pts|points/i.test(a);
+          });
+          if (elAttr) {
+            const m = (clean(elAttr.getAttribute("title")) || clean(elAttr.getAttribute("aria-label")) || "")
+              .match(/-?\d+/);
+            if (m) ptsText = m[0];
+          }
+        }
+        // 1c) ultimissime secours : repérer "Pts 4" dans le texte de la ligne
+        if (!ptsText) {
+          const m = clean(r.textContent).match(/(?:pts?|points?)\s*:?\s*(-?\d+)/i);
+          if (m) ptsText = m[1];
+        }
+        // 1d) tout dernier recours (pour ne PAS renvoyer vide) : prendre le nombre
+        //     situé après le nom de l’équipe, pas le dernier
+        let points = NaN;
+        if (ptsText) {
+          points = parseInt(ptsText, 10);
+        } else {
+          const text = clean(r.textContent);
+          const nums = text.match(/-?\d+/g) || [];
+          if (nums.length) {
+            // éviter de prendre un "+/-" : privilégier un nombre non précédé de +/-
+            const good = nums.find((n) => !new RegExp(`[+\\-]\\s*${n}`).test(text));
+            points = parseInt(good || nums[0], 10);
+          }
+        }
+
+        if (team && Number.isFinite(points)) {
+          // nettoyage léger nom d’équipe
+          team = team.split(" — ")[0].split(" - ")[0].split(",")[0];
+          result.push({ team, points });
+        }
+      }
+      return result;
+    }
+
+    // 2) Fallback : véritables tableaux <table>
+    const headerEls = Array.from(document.querySelectorAll("thead th, [role=columnheader]"));
+    const headers = headerEls.map((h) => clean(h.textContent).toLowerCase());
+    let idxTeam = headers.findIndex((h) => /(équipe|team)/.test(h));
+    let idxPts  = headers.findIndex((h) => /^(pts|points)\b/.test(h));
+
+    const lineEls = Array.from(
+      document.querySelectorAll("tbody tr, [role=rowgroup] [role=row]")
+    );
+
+    for (const tr of lineEls) {
+      const cells = Array.from(tr.querySelectorAll("td, [role=cell], th, div"));
+      const texts = cells.map((c) => clean(c.textContent)).filter(Boolean);
+
+      // Team
+      let team = idxTeam >= 0 && idxTeam < texts.length ? texts[idxTeam] : null;
+      if (!team) {
         team = texts.filter((t) => /[A-Za-zÀ-ÿ]/.test(t)).sort((a, b) => b.length - a.length)[0];
       }
+      if (team) team = team.split(" — ")[0].split(" - ")[0].split(",")[0];
 
-      // Nettoyage éventuel (certains affichent le manager après une virgule ou un "—")
-      if (team) {
-        team = team.split(" — ")[0].split(" - ")[0].split(",")[0].trim();
-      }
-
-      // c) Extraction des points via la colonne "Pts/Points"
-      let ptsText = null;
+      // Points
+      let points = NaN;
       if (idxPts >= 0 && idxPts < texts.length) {
-        ptsText = texts[idxPts];
+        points = pickInt(texts[idxPts]);
       } else {
-        // dernier recours: chercher un élément dont le header implicite contient "pts"
-        const ptsEl = Array.from(row.querySelectorAll("*")).find((el) =>
-          /pts|points/i.test(getTxt(el))
-        );
-        ptsText = getTxt(ptsEl);
+        // essayer de repérer "Pts 4" dans la ligne
+        const m = clean(tr.textContent).match(/(?:pts?|points?)\s*:?\s*(-?\d+)/i);
+        if (m) points = parseInt(m[1], 10);
       }
 
-      const m = ptsText.match(/-?\d+/);
-      const points = m ? parseInt(m[0], 10) : NaN;
-
-      if (team && Number.isFinite(points)) {
-        result.push({ team, points });
-      }
+      if (team && Number.isFinite(points)) result.push({ team, points });
     }
 
     return result;
   });
 
-  return rows || out;
+  return Array.isArray(rows) ? rows : out;
 }
 
-/* ======================== AGREGE + CLASSE ======================== */
-function aggregate(leaguesData) {
-  const teams = new Map();
-
-  for (const code of ORDER) {
-    const map = leaguesData[code] || new Map();
-    for (const [name, { pts, diff }] of map.entries()) {
-      if (!teams.has(name)) {
-        teams.set(name, {
-          name,
-          FR: { pts: 0, diff: 0 },
-          EN: { pts: 0, diff: 0 },
-          ES: { pts: 0, diff: 0 },
-          IT: { pts: 0, diff: 0 },
-          totalPts: 0,
-          totalDiff: 0,
-          greens: 0,
-          reds: 0,
-        });
-      }
-      const t = teams.get(name);
-      t[code].pts = pts;
-      t[code].diff = diff;
-    }
+function aggregate(leagues) {
+  const columns = ["FR", "EN", "ES", "IT"];
+  const teams = new Set();
+  for (const col of columns) {
+    for (const row of leagues[col] || []) teams.add(row.team);
   }
 
-  for (const t of teams.values()) {
-    t.totalPts = ORDER.reduce((s, c) => s + (t[c].pts || 0), 0);
-    t.totalDiff = ORDER.reduce((s, c) => s + (t[c].diff || 0), 0);
+  const byTeam = {};
+  for (const team of teams) {
+    const pts = Object.fromEntries(
+      columns.map((c) => [c, (leagues[c] || []).find((x) => x.team === team)?.points ?? 0])
+    );
+    const total = columns.reduce((s, c) => s + pts[c], 0);
+    byTeam[team] = { team, ...pts, total };
   }
 
-  // Min/Max par colonne
-  const minPts = {}, maxPts = {};
-  for (const code of ORDER) {
-    const vals = Array.from(teams.values()).map((t) => t[code].pts || 0);
-    minPts[code] = vals.length ? Math.min(...vals) : 0;
-    maxPts[code] = vals.length ? Math.max(...vals) : 0;
+  // max/min par colonne pour cases vertes/rouges
+  const maxPerCol = Object.fromEntries(
+    ["FR", "EN", "ES", "IT"].map((c) => [
+      c,
+      Math.max(0, ...Object.values(byTeam).map((x) => x[c])),
+    ])
+  );
+  const minPerCol = Object.fromEntries(
+    ["FR", "EN", "ES", "IT"].map((c) => [
+      c,
+      Math.min(...Object.values(byTeam).map((x) => x[c])),
+    ])
+  );
+
+  for (const t of Object.values(byTeam)) {
+    t.wins = ["FR", "EN", "ES", "IT"].filter((c) => t[c] === maxPerCol[c]).length;
+    t.lasts = ["FR", "EN", "ES", "IT"].filter((c) => t[c] === minPerCol[c]).length;
   }
-  const totals = Array.from(teams.values()).map((t) => t.totalPts);
-  const diffs = Array.from(teams.values()).map((t) => t.totalDiff);
-  const minTotal = totals.length ? Math.min(...totals) : 0;
-  const maxTotal = totals.length ? Math.max(...totals) : 0;
-  const minDiffAll = diffs.length ? Math.min(...diffs) : 0;
-  const maxDiffAll = diffs.length ? Math.max(...diffs) : 0;
 
-  // Compter verts/rouges FR/EN/ES/IT
-  for (const t of teams.values()) {
-    t.greens = ORDER.reduce((s, c) => s + (t[c].pts === maxPts[c] ? 1 : 0), 0);
-    t.reds = ORDER.reduce((s, c) => s + (t[c].pts === minPts[c] ? 1 : 0), 0);
-  }
-
-  // Tri final
-  const rows = Array.from(teams.values()).sort((a, b) => {
-    if (b.totalPts !== a.totalPts) return b.totalPts - a.totalPts;
-    if (b.greens !== a.greens) return b.greens - a.greens;
-    if (a.reds !== b.reds) return a.reds - b.reds;
-    if (b.totalDiff !== a.totalDiff) return b.totalDiff - a.totalDiff;
-    return 0;
-  });
-
-  return { rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll };
+  const table = Object.values(byTeam).sort(
+    (a, b) =>
+      b.total - a.total ||
+      b.wins - a.wins ||
+      a.lasts - b.lasts ||
+      a.team.localeCompare(b.team)
+  );
+  table.forEach((r, i) => (r.rank = i + 1));
+  return table;
 }
 
-/* ======================== RENDU HTML (à partir des objets) ======================== */
-function buildHtml({ rows, minPts, maxPts, minTotal, maxTotal, minDiffAll, maxDiffAll }) {
-  // Horodatage heure de Paris
-  const updated = new Date().toLocaleString("fr-FR", {
-    timeZone: "Europe/Paris",
-    hour12: false,
-  });
+function renderHTML(table) {
+  const genAt = nowStr();
+  const th = (txt) => `<th>${txt}</th>`;
+  const td = (txt, cls = "") => `<td class="${cls}">${txt}</td>`;
 
-  // helpers d'affichage
-  const cls = (val, min, max) =>
-    (val === max ? " tag-green" : "") + (val === min ? " tag-red" : "");
-  const safe = (v) => (v === null || v === undefined ? "–" : v);
+  const columns = ["FR", "EN", "ES", "IT"];
+  const max = Object.fromEntries(columns.map((c) => [c, Math.max(...table.map((r) => r[c])) || 0]));
+  const min = Object.fromEntries(columns.map((c) => [c, Math.min(...table.map((r) => r[c])) || 0]));
 
-  // rows vient de aggregate(): [{ name, FR:{pts,diff}, EN:{...}, ES:{...}, IT:{...}, totalPts, totalDiff, greens, reds }, ...]
-  const rowsHtml = (rows || []).map((t, i) => {
-    const rank = i + 1;
+  const rows = table.map((r) => {
+      const cells = columns
+        .map((c) => {
+          const cls = r[c] === max[c] ? "best" : r[c] === min[c] ? "worst" : "";
+          return td(r[c], cls);
+        })
+        .join("");
+      return `<tr>
+        ${td(r.rank)}
+        ${td(r.team)}
+        ${cells}
+        ${td(`<strong>${r.total}</strong>`)}
+        ${td(r.wins)}
+        ${td(r.lasts)}
+      </tr>`;
+    }).join("\n");
 
-    // points par ligue (nombre) avec classes min/max
-    const cellsPts = ORDER.map((code) => {
-      const val = Number(t[code]?.pts ?? 0);
-      return `<td class="num${cls(val, minPts[code], maxPts[code])}">${isNaN(val) ? "–" : val}</td>`;
-    }).join("");
-
-    // diff total (nombre signé + vert/rouge selon min/max)
-    const diff = Number(t.totalDiff ?? 0);
-    const diffTxt = isNaN(diff) ? "–" : (diff > 0 ? `+${diff}` : String(diff));
-    const diffClass = isNaN(diff) ? "" : cls(diff, minDiffAll, maxDiffAll);
-
-    // total points (nombre + min/max)
-    const total = Number(t.totalPts ?? 0);
-    const totalClass = isNaN(total) ? "" : cls(total, minTotal, maxTotal);
-
-    return `
-<tr>
-  <td class="rank">${rank}</td>
-  <td class="team">${safe(t.name)}</td>
-  ${cellsPts}
-  <td class="num${diffClass}">${diffTxt}</td>
-  <td class="num total total-col${totalClass}">${isNaN(total) ? "–" : total}</td>
-</tr>`.trim();
-  }).join("\n");
-
-  const html = `<!DOCTYPE html>
+  return `<!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
+  <title>Classement MPG — Global</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${PAGE_TITLE}</title>
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
   <style>
-    :root { --bg:#ffffff; --text:#111; --muted:#666; --line:#eee; --accent:#b9c2ff; --accent-bg:#f4f6ff; }
-    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); margin:24px; }
-
-    .wrap { max-width: 1100px; margin: 0 auto; }
-
-    .logo { text-align:center; margin-bottom:16px; }
-    .logo img { display:block; width:100%; height:auto; max-height:160px; object-fit:contain; margin:0 auto; }
-
-    .table-wrap { display:flex; justify-content:center; overflow-x:auto; }
-
-    table { border-collapse:collapse; table-layout:fixed; width:max-content; }
-    th, td {
-      padding:8px 10px; border-bottom:1px solid var(--line);
-      text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    }
-    th:nth-child(2), td:nth-child(2) { text-align:left; }
-
-    /* écart minimal entre Équipe et FR */
-    th:nth-child(2), td:nth-child(2) { padding-right:2px; }
-    th:nth-child(3), td:nth-child(3) { padding-left:2px; }
-
-    .rank { width:42px; color:var(--muted); }
-    .team { width:1%; white-space:nowrap; }
-    .num  { width:48px; }
-
+    :root { --bg:#fff; --fg:#111; --muted:#666; --border:#e5e7eb; --best:#e6ffed; --worst:#ffecec;}
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--fg); margin:40px auto; max-width:1100px; padding:0 16px; }
+    .card { border:1px solid var(--border); border-radius:14px; padding:22px; box-shadow:0 1px 2px rgba(0,0,0,.03);}
+    h1 { margin:0 0 6px 0; font-size:28px; }
+    small { color:var(--muted); }
+    table { width:100%; border-collapse: collapse; margin-top:14px; }
+    th, td { padding:10px 12px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap;}
+    thead th { background:#fafafa; position:sticky; top:0; }
     tr:hover td { background:#fafafa; }
-
-    .tag-green { background:#e6ffed; }
-    .tag-red   { background:#ffecec; }
-
-    .total-col { border:2px solid var(--accent); background:var(--accent-bg); border-radius:8px; }
-    .total { font-weight:800; }
-
-    .updated { color:var(--muted); font-size:13px; margin-top:12px; text-align:left; }
+    td.best { background: var(--best); font-weight:600;}
+    td.worst { background: var(--worst);}
+    .legend { margin-top:10px; color:var(--muted); font-size:14px;}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="logo">
-      <img src="logo.png" alt="European MPG Super League" />
-    </div>
-
-    <div class="table-wrap">
-      <table>
-        <colgroup>
-          <col style="width:42px">
-          <col style="width:1%">
-          <col style="width:48px">
-          <col style="width:48px">
-          <col style="width:48px">
-          <col style="width:48px">
-          <col style="width:64px">
-          <col style="width:72px">
-        </colgroup>
-        <thead>
-          <tr>
-            <th class="rank">#</th>
-            <th class="team">Équipe</th>
-            <th class="num" title="FR">FR</th>
-            <th class="num" title="GB">GB</th>
-            <th class="num" title="ES">ES</th>
-            <th class="num" title="IT">IT</th>
-            <th class="num" title="Différence de buts cumulée">Diff +/-</th>
-            <th class="num total total-col" title="Points cumulés">TOTAL</th>
-          </tr>
-        </thead>
-        <tbody>
-${rowsHtml}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="updated">Dernière Mise à jour : ${updated}</div>
+  <div class="card">
+    <h1>Classement MPG — Global</h1>
+    <p><small>Mis à jour automatiquement : ${genAt}</small></p>
+    <table>
+      <thead>
+        <tr>
+          ${th("#")}
+          ${th("Équipe")}
+          ${th("FR")}
+          ${th("EN")}
+          ${th("ES")}
+          ${th("IT")}
+          ${th("Total")}
+          ${th("Verts")}
+          ${th("Rouges")}
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="legend">Verts = meilleur score de la ligue ; Rouges = plus petit score de la ligue (sert aux tie-breakers).</div>
   </div>
 </body>
 </html>`;
-  return html;
 }
 
-/* ======================== SVG (affiche mobile – rendu de base) ======================== */
-function buildBoardSvg(aggregated, updatedAt) {
-  const rows = aggregated?.rows || [];
+async function main() {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
 
-  // dimensions portrait pour mobile
-  const width = 1080;
-  const height = 1920;
+  await login(page);
 
-  // layout de base
-  const marginLeft = 30;
-  const startY = 220;        // sous le logo
-  const rowHeight = 120;     // hauteur de ligne
-  const colWidths = [100, 320, 110, 110, 110, 110, 150, 160]; // # | Équipe | FR | GB | ES | IT | Δ | TOTAL
-
-  const headers = ["#", "Équipe", "🇫🇷", "🇬🇧", "🇪🇸", "🇮🇹", "Δ", "TOTAL"];
-
-  // utilitaires
-  const safeNum = (n) => (Number.isFinite(n) ? n : "–");
-  const signed = (n) => (Number.isFinite(n) ? (n > 0 ? `+${n}` : String(n)) : "–");
-
-  let y = startY;
-  let svg = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">
-  <style>
-    text { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; fill:#111; dominant-baseline:middle; }
-    .h  { font-weight:700; font-size:40px; }
-    .c  { font-size:36px; }
-    .muted { fill:#555; }
-    .grid { stroke:#eee; stroke-width:2; }
-  </style>
-
-  <!-- Logo en haut -->
-  <image href="logo.png" x="${marginLeft}" y="20" width="220" height="160"/>
-
-  <!-- Entêtes -->
-  <g>
-    ${(() => {
-      let x = marginLeft;
-      return headers.map((h, i) => {
-        const cx = x + colWidths[i] / 2;
-        x += colWidths[i];
-        return `<text class="h" x="${cx}" y="${y}" text-anchor="middle">${h}</text>`;
-      }).join("");
-    })()}
-  </g>
-`;
-
-  y += rowHeight;
-
-  // lignes équipes (10 équipes max selon ton cahier des charges)
-  rows.slice(0, 10).forEach((t, i) => {
-    let x = marginLeft;
-    const rank = i + 1;
-    const vals = [
-      `#${rank}`,
-      t.name ?? "",
-      safeNum(t.FR?.pts),
-      safeNum(t.EN?.pts),
-      safeNum(t.ES?.pts),
-      safeNum(t.IT?.pts),
-      signed(t.totalDiff),
-      safeNum(t.totalPts),
-    ];
-
-    // grille horizontale (option légère pour séparer visuellement)
-    svg += `<line class="grid" x1="${marginLeft}" y1="${y}" x2="${width - marginLeft}" y2="${y}"/>`;
-
-    vals.forEach((val, idx) => {
-      const cx = x + colWidths[idx] / 2;
-      svg += `<text class="c" x="${cx}" y="${y + rowHeight / 2}" text-anchor="middle">${val}</text>`;
-      x += colWidths[idx];
-    });
-
-    y += rowHeight;
-  });
-
-  // footer "Dernière MaJ"
-  svg += `
-  <text class="c muted" x="${marginLeft}" y="${height - 40}" text-anchor="start">Dernière MaJ : ${updatedAt}</text>
-</svg>
-`;
-  return svg;
-}
-
-/* ======================== MAIN ======================== */
-(async () => {
-  console.log("🚀 generate.mjs démarré", nowFR());
-  for (const k of ORDER) if (!LEAGUES[k]) console.warn(`⚠️ URL manquante pour ${k}`);
-
-  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
-  try {
-    const context = await browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      locale: "fr-FR",
-      timezoneId: "Europe/Paris",
-    });
-
-    // Tentative login une fois
-    await loginIfNeeded(context);
-
-    const leaguesData = {};
-    for (const code of ORDER) {
-      const started = Date.now();
-      leaguesData[code] = await scrapeLeague(context, code, LEAGUES[code]).catch(() => new Map());
-      console.log(`⏱️ ${code} traité en ${(Date.now() - started) / 1000}s`);
+  const leagues = {};
+  for (const [code, url] of Object.entries(LEAGUES)) {
+    try {
+      leagues[code] = await scrapeLeague(page, url);
+      console.log(`✓ ${code}: ${leagues[code].length} équipes lues`);
+    } catch (e) {
+      console.log(`⚠️ ${code} indisponible:`, e.message);
+      leagues[code] = [];
     }
-
-    const aggregated = aggregate(leaguesData);
-
-    // Horodatage partagé (Paris) pour HTML + SVG
-    const updatedAt = new Intl.DateTimeFormat("fr-FR", {
-      timeZone: "Europe/Paris",
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit",
-      hour12: false,
-    }).format(new Date()).replace(",", " à");
-
-    const html = buildHtml(aggregated);
-    const svg  = buildBoardSvg(aggregated, updatedAt);
-
-    if (OUTPUT_DIR !== "." && !existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
-    writeFileSync(OUTPUT_FILE, html, "utf8");
-    writeFileSync(OUTPUT_SVG, svg, "utf8");
-    console.log(`💾 Page générée → ${OUTPUT_FILE}`);
-    console.log(`💾 Board SVG   → ${OUTPUT_SVG}`);
-  } catch (e) {
-    console.error("❌ Erreur durant la génération :", e?.stack || e);
-    process.exitCode = 1;
-  } finally {
-    await browser.close().catch(() => {});
-    console.log("🏁 Terminé", nowFR());
+    await sleep(300); // petite pause
   }
-})();
+
+  await browser.close();
+
+  const table = aggregate(leagues);
+
+  mkdirSync("docs", { recursive: true });
+  writeFileSync("docs/index.html", renderHTML(table), "utf8");
+  console.log("✅ Page générée avec", table.length, "équipes :", nowStr());
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
