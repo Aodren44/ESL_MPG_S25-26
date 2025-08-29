@@ -213,90 +213,94 @@ async function loginIfNeeded(context) {
 }
 
 /* ======================== SCRAPING ======================== */
-async function scrapeLeague(context, code, url) {
-  const page = await context.newPage();
-  page.setDefaultTimeout(15000);
-
-  let triedLogin = false;
-
-  async function ensureOnLeague() {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await acceptCookiesRobust(page);
-  }
-
+async function scrapeLeague(page, url) {
+  const out = [];
   try {
-    console.log(`▶️  ${code} → ${url || "(vide)"}`);
-    if (!url) throw new Error(`URL manquante pour ${code}`);
-
-    await ensureOnLeague();
-
-    const firstHtml = await page.content().catch(() => "");
-    if ((/\/login/i.test(page.url()) || /Du foot, des amis/.test(firstHtml)) && !triedLogin) {
-      console.log(`🔁 ${code}: redirigé vers login/homepage → login + 2e tentative`);
-      triedLogin = await loginIfNeeded(context);
-      await ensureOnLeague();
-    }
-
-    await page.waitForSelector("table", { timeout: 20000 }).catch(() => {});
-    await sleep(1000);
-
-    let rows =
-      (await page
-        .$$eval("table tbody tr", (trs) =>
-          trs.map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
-        )
-        .catch(() => [])) || [];
-
-    if (!rows.length) {
-      rows =
-        (await page
-          .$eval("table", (tbl) =>
-            Array.from(tbl.querySelectorAll("tr"))
-              .filter((tr) => tr.querySelectorAll("td").length)
-              .map((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()))
-          )
-          .catch(() => [])) || [];
-    }
-
-    if (!rows.length) {
-      await dumpForDebug(page, code);
-      throw new Error(`Aucune ligne de classement trouvée pour ${code}`);
-    }
-
-    const headers =
-      (await page.$$eval("table thead th", (ths) => ths.map((th) => th.textContent.trim())).catch(() => [])) || [];
-    const findIdx = (re, fallback) => {
-      const i = headers.findIndex((h) => re.test(h || ""));
-      return i !== -1 ? i : fallback;
-    };
-    const idxTeam = findIdx(/équipe|equipe|team/i, 1);
-    const idxPts = findIdx(/points|pts/i, Math.max(0, (headers.length || 1) - 1));
-    const idxDiff = findIdx(/\+\/-|±|diff/i, Math.max(0, idxPts - 1));
-
-    const data = new Map();
-    for (const row of rows) {
-      if (!row || !row.length) continue;
-      const name = canonicalName(row[idxTeam] ?? row[1] ?? row[0]);
-      const pts = parseIntSafe(row[idxPts], 0);
-      const diff = parseIntSafe(row[idxDiff], 0);
-      if (!name) continue;
-      data.set(name, { pts, diff });
-    }
-
-    if (!data.size) {
-      await dumpForDebug(page, code);
-      throw new Error(`Tableau lu mais vide pour ${code}`);
-    }
-
-    console.log(`✅ ${code}: ${data.size} équipes`);
-    return data;
-  } catch (e) {
-    console.warn(`⚠️ ${code}: échec (${e?.message || e}). On continue avec 0. Voir dumps.`);
-    return new Map();
-  } finally {
-    await page.close().catch(() => {});
+    await page.goto(url, { waitUntil: "networkidle" });
+  } catch {
+    return out; // ligue pas accessible
   }
+
+  // S’assurer que le tableau est bien en place (apps React -> parfois "networkidle" ne suffit pas)
+  try {
+    await page.waitForFunction(() => {
+      const hasTable = document.querySelector("table");
+      const hasRows =
+        document.querySelector("tbody tr,[role=rowgroup] [role=row],[data-testid=ranking-row]");
+      return hasTable && hasRows;
+    }, { timeout: 10000 });
+  } catch {
+    return out;
+  }
+
+  // On exécute tout le parsing côté page pour être robuste et rapide
+  const rows = await page.evaluate(() => {
+    const getTxt = (el) =>
+      (el?.textContent || "").trim().replace(/\s+/g, " ");
+
+    // 1) Lire les headers pour trouver l’index de "Pts/Points" et "Équipe/Team"
+    const headerEls = Array.from(
+      document.querySelectorAll("thead th, [role=columnheader]")
+    );
+    const headers = headerEls.map((h) => getTxt(h).toLowerCase());
+
+    let idxPts = headers.findIndex((h) => /^(pts|points)\b/.test(h));
+    let idxTeam = headers.findIndex((h) => /(équipe|team)/.test(h));
+
+    // 2) Récupérer les lignes (plusieurs structures possibles)
+    const lineEls = Array.from(
+      document.querySelectorAll(
+        "tbody tr, [role=rowgroup] [role=row], [data-testid=ranking-row]"
+      )
+    );
+
+    const result = [];
+    for (const row of lineEls) {
+      // Sauter une éventuelle ligne d’en-tête
+      if (row.querySelector("th")) continue;
+
+      // a) Cas simple: cellules classiques
+      const cells = Array.from(row.querySelectorAll("td, [role=cell], th, div"));
+      const texts = cells.map(getTxt).filter(Boolean);
+
+      // b) Extraction du nom d'équipe
+      let team = null;
+      if (idxTeam >= 0 && idxTeam < texts.length) {
+        team = texts[idxTeam];
+      } else {
+        // fallback: plus long texte non purement numérique
+        team = texts.filter((t) => /[A-Za-zÀ-ÿ]/.test(t)).sort((a, b) => b.length - a.length)[0];
+      }
+
+      // Nettoyage éventuel (certains affichent le manager après une virgule ou un "—")
+      if (team) {
+        team = team.split(" — ")[0].split(" - ")[0].split(",")[0].trim();
+      }
+
+      // c) Extraction des points via la colonne "Pts/Points"
+      let ptsText = null;
+      if (idxPts >= 0 && idxPts < texts.length) {
+        ptsText = texts[idxPts];
+      } else {
+        // dernier recours: chercher un élément dont le header implicite contient "pts"
+        const ptsEl = Array.from(row.querySelectorAll("*")).find((el) =>
+          /pts|points/i.test(getTxt(el))
+        );
+        ptsText = getTxt(ptsEl);
+      }
+
+      const m = ptsText.match(/-?\d+/);
+      const points = m ? parseInt(m[0], 10) : NaN;
+
+      if (team && Number.isFinite(points)) {
+        result.push({ team, points });
+      }
+    }
+
+    return result;
+  });
+
+  return rows || out;
 }
 
 /* ======================== AGREGE + CLASSE ======================== */
