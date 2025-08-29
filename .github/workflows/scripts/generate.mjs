@@ -45,6 +45,9 @@ async function login(page) {
   await page.waitForLoadState("networkidle");
 }
 
+/* ==========================
+   SEULE MODIF IMPORTANTE ICI
+   ========================== */
 async function scrapeLeague(page, url) {
   const out = [];
   try {
@@ -54,64 +57,88 @@ async function scrapeLeague(page, url) {
     return out;
   }
 
-  // Attendre soit des rangées identifiées, soit un tableau générique
+  // Attendre que l'UI React ait fini de rendre un tableau et des lignes
   try {
-    await page.waitForSelector(
-      '[data-testid="ranking-row"], table, [role="table"]',
-      { timeout: 10000 }
-    );
+    await page.waitForFunction(() => {
+      const hasTable = document.querySelector("table");
+      const hasRows =
+        document.querySelector("tbody tr,[role=rowgroup] [role=row],[data-testid=ranking-row]");
+      return hasTable && hasRows;
+    }, { timeout: 10000 });
   } catch {
     return out;
   }
 
-  // 1) Essai: rangées marquées
-  const rows = await page.$$('[data-testid="ranking-row"]');
-  if (rows.length > 0) {
-    for (const r of rows) {
-      const name =
-        (await r.locator(".team-name, .name, [data-testid=team-name]").textContent().catch(() => null))?.trim() ??
-        (await r.textContent()).trim();
-      // points souvent dans un élément ".points" / ".pts"
-      let ptsText =
-        (await r.locator(".points, .pts").textContent().catch(() => null)) ??
-        "";
-      if (!ptsText) {
-        // fallback: on récupère tout le texte et on prend le dernier entier
-        const all = (await r.textContent()) || "";
-        const nums = all.match(/\d+/g) || [];
-        ptsText = nums.length ? nums[nums.length - 1] : "";
+  // Parser côté page pour être robuste et ne lire que la colonne Points
+  const rows = await page.evaluate(() => {
+    const getTxt = (el) =>
+      (el?.textContent || "").trim().replace(/\s+/g, " ");
+
+    // 1) Lire les en-têtes (thead ou rôles ARIA)
+    const headerEls = Array.from(
+      document.querySelectorAll("thead th, [role=columnheader]")
+    );
+    const headers = headerEls.map((h) => getTxt(h).toLowerCase());
+
+    // Index des colonnes "Pts/Points" et "Équipe/Team"
+    let idxPts = headers.findIndex((h) => /^(pts|points)\b/.test(h));
+    let idxTeam = headers.findIndex((h) => /(équipe|team)/.test(h));
+
+    // 2) Récupérer les lignes (plusieurs structures possibles)
+    const lineEls = Array.from(
+      document.querySelectorAll(
+        "tbody tr, [role=rowgroup] [role=row], [data-testid=ranking-row]"
+      )
+    );
+
+    const result = [];
+    for (const row of lineEls) {
+      // ignorer une éventuelle ligne d'en-tête
+      if (row.querySelector("th")) continue;
+
+      // cellules visibles
+      const cells = Array.from(row.querySelectorAll("td, [role=cell], th, div"));
+      const texts = cells.map(getTxt).filter(Boolean);
+
+      // Nom d'équipe depuis colonne dédiée, sinon meilleur fallback
+      let team = null;
+      if (idxTeam >= 0 && idxTeam < texts.length) {
+        team = texts[idxTeam];
+      } else {
+        // fallback: plus long texte non purement numérique
+        team = texts
+          .filter((t) => /[A-Za-zÀ-ÿ]/.test(t))
+          .sort((a, b) => b.length - a.length)[0];
       }
-      const points = Number.parseInt(ptsText.replace(",", "."), 10);
-      if (name && Number.isFinite(points)) out.push({ team: name, points });
-    }
-    return out;
-  }
-
-  // 2) Fallback: on tente un tableau classique
-  const trs = await page.$$("table tr, [role=table] tr");
-  for (const tr of trs) {
-    const tds = await tr.$$("td, th, div");
-    if (!tds.length) continue;
-
-    // Heuristique: chercher un libellé "équipe" + un entier pour points
-    let team = null;
-    let points = null;
-
-    for (const el of tds) {
-      const txt = ((await el.textContent()) || "").trim();
-      if (!team && /[A-Za-zÀ-ÿ]/.test(txt) && txt.length > 1) {
-        team = txt;
+      if (team) {
+        // Nettoyage de suffixes éventuels
+        team = team.split(" — ")[0].split(" - ")[0].split(",")[0].trim();
       }
-      if (!points && /^\d+$/.test(txt)) {
-        points = Number.parseInt(txt, 10);
+
+      // Points uniquement via la colonne "Pts/Points"
+      let ptsText = null;
+      if (idxPts >= 0 && idxPts < texts.length) {
+        ptsText = texts[idxPts];
+      } else {
+        // Dernier recours: un élément dont le libellé interne contient pts/points
+        const ptsEl = Array.from(row.querySelectorAll("*")).find((el) =>
+          /pts|points/i.test(getTxt(el))
+        );
+        ptsText = getTxt(ptsEl);
+      }
+
+      const m = ptsText.match(/-?\d+/);
+      const points = m ? parseInt(m[0], 10) : NaN;
+
+      if (team && Number.isFinite(points)) {
+        result.push({ team, points });
       }
     }
 
-    if (team && Number.isFinite(points)) {
-      out.push({ team, points });
-    }
-  }
-  return out;
+    return result;
+  });
+
+  return rows || out;
 }
 
 function aggregate(leagues) {
